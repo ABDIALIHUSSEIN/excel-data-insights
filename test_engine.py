@@ -106,3 +106,14 @@ assert guess_type(pd.Series(["$1"] * 9 + ["n/a"])) == "Number"
 assert guess_type(pd.Series(["1", "2", "n/a"])) == "Text"  # 67% is not enough
 assert guess_date_format(pd.Series(["2026-01-0%d" % d for d in range(1, 10)] + ["soon"])) == "%Y-%m-%d"
 print("detection ok")
+
+# Row limit counts data rows, not the header.
+from engine import MAX_ROWS  # noqa: E402
+header_plus_max = ("n\n" + "1\n" * MAX_ROWS).encode()
+assert len(rg(header_plus_max)) == MAX_ROWS + 1
+try:
+    rg(("n\n" + "1\n" * (MAX_ROWS + 1)).encode())
+    raise AssertionError("over-limit file accepted")
+except DataError:
+    pass
+print("limits ok")

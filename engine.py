@@ -39,7 +39,7 @@ def read_grid(content, sheet=None, delimiter=","):
     if sheet is None:
         # csv.reader tolerates ragged rows (e.g. trailing commas); pad them to the widest row.
         rows = list(islice(csv.reader(StringIO(decode(content), newline=""), delimiter=delimiter),
-                           MAX_ROWS + 1))
+                           MAX_ROWS + 2))
         width = max(map(len, rows), default=0)
         if width > MAX_COLUMNS:
             raise DataError("Limit exceeded: 100,000 rows, 250 columns, or 1 million cells.")
@@ -47,11 +47,12 @@ def read_grid(content, sheet=None, delimiter=","):
     else:
         grid = pd.read_excel(BytesIO(content), sheet_name=sheet, header=None,
                              dtype=object, keep_default_na=False,
-                             engine="openpyxl", nrows=MAX_ROWS + 1)
+                             engine="openpyxl", nrows=MAX_ROWS + 2)
     grid = grid.replace(r"^\s*$", pd.NA, regex=True)
     if grid.empty or grid.isna().all().all():
         raise DataError("The file or worksheet has no data.")
-    if len(grid) > MAX_ROWS or len(grid.columns) > MAX_COLUMNS or grid.size > MAX_CELLS:
+    # MAX_ROWS counts data rows; the grid also holds the header row.
+    if len(grid) > MAX_ROWS + 1 or len(grid.columns) > MAX_COLUMNS or grid.size > MAX_CELLS:
         raise DataError("Limit exceeded: 100,000 rows, 250 columns, or 1 million cells.")
     return grid
 
@@ -74,7 +75,8 @@ def use_header(grid, row):
 
 
 def guess_type(series):
-    values = series.dropna()
+    # A suggestion only, so judge the first 5,000 values; cleaning still checks every cell.
+    values = series.dropna().head(5000)
     if values.empty:
         return "Text"
     if values.map(lambda value: isinstance(value, (datetime, date))).all():

@@ -338,6 +338,8 @@ with dashboard:
     controls = st.container(border=True)
     picks = controls.columns(4)
     ROWS = tr("Row count", "Tirada safafka")  # counts rows, like "Headcount"
+    while ROWS in cleaned.columns:  # never clash with a real column of the same name
+        ROWS += " ·"
     measure = picks[0].selectbox(tr("Measure", "Cabbirka"), [*numeric, ROWS], key=f"measure-{key}")
     date_column = picks[1].selectbox(tr("Date", "Taariikhda"), dates, key=f"date-{key}") if dates else None
     # Default to the richest useful grouping (like Department); the split takes the smallest (like Gender).
