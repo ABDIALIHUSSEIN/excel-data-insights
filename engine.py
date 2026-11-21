@@ -81,7 +81,8 @@ def guess_type(series):
         return "Date"
     if values.astype(str).str.match(r"^[+-]?0\d+$").any():
         return "Text"
-    if parse_number(values).notna().all():
+    # 90% rather than all: a few "n/a" cells should be flagged as invalid, not hide a number column.
+    if parse_number(values).notna().mean() >= 0.9:
         return "Number"
     if guess_date_format(values):
         return "Date"
@@ -95,12 +96,12 @@ DATE_FORMATS = ["%Y-%m-%d", "%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S", "%Y/%m/%d",
 
 
 def guess_date_format(series):
-    """First format that reads every value, judged on up to 1,000 values; None if none fits."""
+    """First format that reads at least 90% of up to 1,000 values; None if none fits."""
     values = series.dropna().astype("string").str.strip().head(1000)
     if values.empty:
         return None
     for date_format in DATE_FORMATS:
-        if pd.to_datetime(values, format=date_format, errors="coerce").notna().all():
+        if pd.to_datetime(values, format=date_format, errors="coerce").notna().mean() >= 0.9:
             return date_format
     return None
 

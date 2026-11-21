@@ -100,3 +100,9 @@ assert guess_date_format(pd.Series(["26-March-2025"])) == "%d-%B-%Y"
 assert guess_type(pd.Series(["15/03/2026", "16/03/2026"])) == "Date"
 assert guess_type(pd.Series(["Mogadishu", "Baidoa"])) == "Text"
 print("reading ok")
+
+# Mostly-numeric columns stay numbers; the odd cell is reported as invalid.
+assert guess_type(pd.Series(["$1"] * 9 + ["n/a"])) == "Number"
+assert guess_type(pd.Series(["1", "2", "n/a"])) == "Text"  # 67% is not enough
+assert guess_date_format(pd.Series(["2026-01-0%d" % d for d in range(1, 10)] + ["soon"])) == "%Y-%m-%d"
+print("detection ok")
