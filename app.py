@@ -92,7 +92,7 @@ class Sample:
         return Path(__file__).with_name(self.name).read_bytes()
 
 
-title_area.title(" Excel Data Insights")
+title_area.title("Excel Data Insights")
 title_area.caption(tr("Upload a spreadsheet, check its quality, and see what changed — in English or Somali.",
                       "Soo geli fayl, hubi tayada xogta, oo arag waxa isbeddelay — Ingiriis ama Soomaali."))
 
