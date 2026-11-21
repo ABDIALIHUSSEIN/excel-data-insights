@@ -37,6 +37,14 @@ def percent_columns(table):
             if name in settings and settings[name][2] == "%"}
 
 
+def chart_ready(table):
+    # Altair reads "name:type" in field names, so a ":" in a column or index name crashes charts.
+    # Swap it for the look-alike "∶" (U+2236) in chart labels only.
+    safe = table.rename(columns=lambda name: str(name).replace(":", "∶"))
+    safe.index.name = None if table.index.name is None else str(table.index.name).replace(":", "∶")
+    return safe
+
+
 def percent_chart(table):
     # Charts cannot format their axis, so scale to 0-100 and say so in the series name.
     return table.apply(lambda column: column * 100 if column.name in percent_columns(table) else column) \
@@ -236,7 +244,7 @@ with dashboard:
                 months = filtered[date_column].dt.to_period("M").astype("string")
                 monthly = filtered[measure].groupby(months)
                 trend = (monthly.mean() if rate else monthly.sum(min_count=1)).dropna().tail(36).to_frame(measure)
-                st.line_chart(percent_chart(trend))
+                st.line_chart(chart_ready(percent_chart(trend)))
         if category:
             with right if date_column and not numbers.empty else left:
                 labels = filtered[category].astype("string").fillna(tr("(Blank)", "(Bannaan)"))
@@ -249,6 +257,7 @@ with dashboard:
                     bars = percent_chart((grouped.mean() if rate else grouped.sum(min_count=1)).dropna()
                                          .nlargest(15).to_frame(measure))
                 # Sorted horizontal bars, largest first; bars start at zero.
+                bars = chart_ready(bars)
                 st.bar_chart(bars, horizontal=True, sort="-" + bars.columns[0])
 
         table = compared["table"] if compared else None
