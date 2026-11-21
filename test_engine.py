@@ -69,4 +69,11 @@ assert compare_periods(sales[sales.Date.dt.month == 9], "Revenue", "Date")["chan
 zero = sales.assign(Revenue=pd.array([0, 0, 5, 0, 0], "Float64"))
 assert compare_periods(zero, "Revenue", "Date")["pct"] is None  # prior 0 -> n/a
 assert compare_periods(sales.iloc[:3], "Revenue", "Date")["partial"]  # data ends 4 Sep
+
+# Year over year: same month last year, skipping the months in between.
+yearly = pd.DataFrame({"Date": pd.to_datetime(["2025-09-10", "2026-08-10", "2026-09-10"]),
+                       "Revenue": pd.array([200, 999, 250], "Float64")})
+y = compare_periods(yearly, "Revenue", "Date", lag=12)
+assert (str(y["previous"]), y["prior"], y["change"], y["pct"]) == ("2025-09", 200, 50, 0.25)
+assert compare_periods(yearly.iloc[1:], "Revenue", "Date", lag=12)["prior"] is None  # no data a year ago
 print("engine ok")

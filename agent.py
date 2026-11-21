@@ -75,8 +75,9 @@ def plan(question, frame, use_ai):
     return operation, measure, grouping
 
 
-def compare_periods(frame, measure, date, group=None, rate=False):
-    """Latest calendar month vs the month before, overall and per group.
+def compare_periods(frame, measure, date, group=None, rate=False, lag=1):
+    """Latest calendar month vs `lag` months earlier (1 = previous month, 12 = a year ago),
+    overall and per group.
 
     Rates (unit %) use the mean of row values and change in percentage points;
     other measures use the sum. Percent change is n/a when the prior value is 0.
@@ -85,7 +86,7 @@ def compare_periods(frame, measure, date, group=None, rate=False):
     latest = months[frame[measure].notna()].max()  # latest month that has values
     if pd.isna(latest):
         return None
-    previous = latest - 1
+    previous = latest - lag
 
     def combine(values):
         return values.mean() if rate else values.sum(min_count=1)

@@ -126,6 +126,11 @@ with dashboard:
     category = picks[2].selectbox(tr("Compare by", "Isbarbardhig"), categories, key=f"category-{key}") if categories else None
     unit = settings[measure][2] if measure else ""
     rate = unit == "%"
+    lag = 1
+    if date_column and measure:
+        lag = st.radio(tr("Compare with", "Is barbar dhig"), [1, 12], horizontal=True, key=f"lag-{key}",
+                       format_func=lambda months: tr("Previous month", "Bishii hore") if months == 1
+                       else tr("Same month last year", "Isla bishaas sannadkii hore"))
     target = 0.0
     if measure and not rate:
         target = picks[3].number_input(tr("Monthly target (optional)", "Hadafka bishii (ikhtiyaari)"),
@@ -185,7 +190,7 @@ with dashboard:
         st.info(tr("No rows match this filter. Press Reset to see all rows.",
                    "Shaandhayntan saf uma soo bixin. Riix Dib u celi si aad u aragto dhammaan safafka."))
     else:
-        compared = compare_periods(filtered, measure, date_column, category, rate) \
+        compared = compare_periods(filtered, measure, date_column, category, rate, lag) \
             if measure and date_column and not numbers.empty else None
         cards = st.columns(4)
         if compared and compared["current"] is not None:
