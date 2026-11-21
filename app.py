@@ -92,7 +92,7 @@ class Sample:
         return Path(__file__).with_name(self.name).read_bytes()
 
 
-title_area.title("📊 Excel Data Insights")
+title_area.title(" Excel Data Insights")
 title_area.caption(tr("Upload a spreadsheet, check its quality, and see what changed — in English or Somali.",
                       "Soo geli fayl, hubi tayada xogta, oo arag waxa isbeddelay — Ingiriis ama Soomaali."))
 
@@ -116,7 +116,7 @@ else:
     for column, (icon, title, text) in zip(steps, [
             ("📤", tr("1. Upload", "1. Soo geli"), tr("An Excel workbook or a CSV file.", "Buug Excel ama fayl CSV.")),
             ("🔍", tr("2. Review", "2. Hubi"), tr("Fix column types, blanks, duplicates, and spelling variants.",
-                                                  "Sax noocyada tiirarka, bannaanada iyo kuwa soo noqnoqda.")),
+                                                 "Sax noocyada tiirarka, bannaanada iyo kuwa soo noqnoqda.")),
             ("📈", tr("3. Explore", "3. Sahami"), tr("KPIs vs last month or last year, trends, and what to check next.",
                                                     "Tilmaamayaasha, isbeddelka iyo waxa xiga ee la hubiyo."))]):
         with column.container(border=True):
@@ -208,7 +208,7 @@ with review:
                                                     "Waa lagama maarmaan si tiir leh qiyam khaldan loo xisaabiyo."),
                                             key=f"invalid-{key}")
         deduplicate = options[2].checkbox(tr("Remove duplicate rows", "Ka saar safafka soo noqnoqda"),
-                                          key=f"duplicates-{key}")
+                                          value=True, key=f"duplicates-{key}")
     cleaned, report, invalid = prepare(frame, settings, normalize, clear_invalid, deduplicate)
 
     with st.container(border=True):
