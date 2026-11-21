@@ -1,4 +1,5 @@
 """Launch with: python -m streamlit run app.py"""
+from datetime import datetime
 from hashlib import sha256
 import os
 from pathlib import Path
@@ -6,7 +7,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from agent import analyze, plan
+from agent import analyze, compare_periods, plan
 from engine import csv_bytes, excel_bytes, guess_type, inspect_workbook, prepare, read_grid, use_header
 
 st.set_page_config(page_title="Excel Data Insights", page_icon="📊", layout="wide")
@@ -117,66 +118,173 @@ numeric = list(cleaned.select_dtypes(include="number").columns)
 dates = list(cleaned.select_dtypes(include="datetime").columns)
 categories = [name for name in cleaned if name not in numeric + dates]
 with dashboard:
+    # Reading order: purpose and period, KPIs, trend, segment comparison, what to check, detail, notes.
+    header = st.container()
+    picks = st.columns(4)
+    measure = picks[0].selectbox(tr("Measure", "Cabbirka"), numeric, key=f"measure-{key}") if numeric else None
+    date_column = picks[1].selectbox(tr("Date", "Taariikhda"), dates, key=f"date-{key}") if dates else None
+    category = picks[2].selectbox(tr("Compare by", "Isbarbardhig"), categories, key=f"category-{key}") if categories else None
+    unit = settings[measure][2] if measure else ""
+    rate = unit == "%"
+    target = 0.0
+    if measure and not rate:
+        target = picks[3].number_input(tr("Monthly target (optional)", "Hadafka bishii (ikhtiyaari)"),
+                                       min_value=0.0, value=0.0, key=f"target-{key}")
+
     filtered = cleaned
-    filter_column = st.selectbox(tr("Filter column", "Tiirka shaandhaynta"), [None, *cleaned.columns],
-                                 format_func=lambda name: name if name is not None else tr("All rows", "Dhammaan safafka"), key=f"filter-{key}")
+    active = tr("All rows", "Dhammaan safafka")
+    filter_key = f"filter-{key}"
+    pick_filter, pick_values, pick_reset = st.columns([2, 3, 1], vertical_alignment="bottom")
+    filter_column = pick_filter.selectbox(tr("Filter", "Shaandhayn"), [None, *cleaned.columns], key=filter_key,
+                                          format_func=lambda name: name if name is not None else tr("All rows", "Dhammaan safafka"))
+    pick_reset.button(tr("Reset", "Dib u celi"), on_click=lambda: st.session_state.update({filter_key: None}),
+                      disabled=filter_column is None, width="stretch")
     if filter_column is not None:
         values = cleaned[filter_column]
-        if filter_column in dates and values.notna().any():
-            start, end = values.min().date(), values.max().date()
-            interval = st.date_input(tr("Date range", "Muddada"), (start, end), min_value=start, max_value=end,
-                                     key=f"range-{key}-{filter_column}-{start}-{end}")
-            if len(interval) == 2:
-                filtered = cleaned[values.dt.date.between(*interval)]
-        elif filter_column in numeric and values.notna().any():
-            low, high = float(values.min()), float(values.max())
-            if low < high:
-                bounds = st.slider(tr("Value range", "Xadka qiimaha"), low, high, (low, high),
-                                   key=f"bounds-{key}-{filter_column}-{low}-{high}")
-                filtered = cleaned[values.between(*bounds)]
-        elif filter_column in categories:
-            labels = values.astype("string")
-            if labels.nunique() > 500:
-                search = st.text_input(tr("Contains", "Ka kooban"), key=f"contains-{key}-{filter_column}")
-                if search:
-                    filtered = cleaned[labels.str.contains(search, case=False, regex=False, na=False)]
-            else:
-                chosen = st.multiselect(tr("Keep these values", "Hay qiyamkan"), sorted(labels.dropna().unique()),
-                                        key=f"choices-{key}-{filter_column}")
-                if chosen:
-                    filtered = cleaned[labels.isin(chosen)]
+        with pick_values:
+            if filter_column in dates and values.notna().any():
+                start, end = values.min().date(), values.max().date()
+                interval = st.date_input(tr("Date range", "Muddada"), (start, end), min_value=start, max_value=end,
+                                         key=f"range-{key}-{filter_column}-{start}-{end}")
+                if len(interval) == 2:
+                    filtered = cleaned[values.dt.date.between(*interval)]
+                    active = f"{filter_column} {interval[0]:%d %b %Y} – {interval[1]:%d %b %Y}"
+            elif filter_column in numeric and values.notna().any():
+                low, high = float(values.min()), float(values.max())
+                if low < high:
+                    bounds = st.slider(tr("Value range", "Xadka qiimaha"), low, high, (low, high),
+                                       key=f"bounds-{key}-{filter_column}-{low}-{high}")
+                    filtered = cleaned[values.between(*bounds)]
+                    active = f"{filter_column} {bounds[0]:,.2f} – {bounds[1]:,.2f}"
+            elif filter_column in categories:
+                labels = values.astype("string")
+                if labels.nunique() > 500:
+                    search = st.text_input(tr("Contains", "Ka kooban"), key=f"contains-{key}-{filter_column}")
+                    if search:
+                        filtered = cleaned[labels.str.contains(search, case=False, regex=False, na=False)]
+                        active = f"{filter_column} ∋ “{search}”"
+                else:
+                    chosen = st.multiselect(tr("Keep these values", "Hay qiyamkan"), sorted(labels.dropna().unique()),
+                                            key=f"choices-{key}-{filter_column}")
+                    if chosen:
+                        filtered = cleaned[labels.isin(chosen)]
+                        active = f"{filter_column}: {', '.join(chosen)}"
 
-    metrics = st.columns(3)
-    metrics[0].metric(tr("Rows in view", "Safafka muuqda"), f"{len(filtered):,}")
-    metrics[1].metric(tr("Columns", "Tiirar"), len(filtered.columns))
-    metrics[2].metric(tr("Blank cells", "Unugyo bannaan"), f"{filtered.isna().sum().sum():,}")
+    period = ""
+    if date_column and filtered[date_column].notna().any():
+        period = f"{filtered[date_column].min():%d %b %Y} – {filtered[date_column].max():%d %b %Y}"
+    with header:
+        st.subheader(tr(f"{measure} overview", f"Dulmarka {measure}") if measure else tr("Data overview", "Dulmarka xogta"))
+        st.caption(" · ".join(part for part in [
+            period and tr("Period: ", "Muddada: ") + period,
+            tr("Filter: ", "Shaandhayn: ") + active,
+            tr(f"{len(filtered):,} rows", f"{len(filtered):,} saf")] if part))
+
+    numbers = filtered[measure].dropna() if measure else pd.Series(dtype="Float64")
     if filtered.empty:
-        st.info(tr("No rows match this view.", "Shaandhayntan saf uma soo bixin."))
+        st.info(tr("No rows match this filter. Press Reset to see all rows.",
+                   "Shaandhayntan saf uma soo bixin. Riix Dib u celi si aad u aragto dhammaan safafka."))
     else:
-        measure = None
-        if numeric:
-            measure = st.selectbox(tr("Numeric measure", "Cabbirka tirada"), numeric, key=f"measure-{key}")
-            numbers = filtered[measure].dropna()
-            unit = settings[measure][2]
-            if not numbers.empty:
-                totals = st.columns(2)
-                totals[0].metric(tr("Total", "Wadar"), show(numbers.sum(), unit))
-                totals[1].metric(tr("Average", "Celcelis"), show(numbers.mean(), unit))
-        if categories:
-            category = st.selectbox(tr("Compare by category", "Isbarbardhig qaybaha"), categories, key=f"category-{key}")
-            _, chart = analyze(filtered, "group_sum" if measure is not None and filtered[measure].notna().any() else "group_count",
-                               measure, category)
-            if not chart.empty:
-                labels = chart.index.to_series().astype("string").fillna(tr("(Blank)", "(Bannaan)"))
-                chart.index = labels.to_list()
-                st.bar_chart(percent_chart(chart.head(15)))
-        if dates and measure is not None and filtered[measure].notna().any():
-            date_column = st.selectbox(tr("Date for monthly trend", "Taariikhda isbeddelka bil kasta"), dates, key=f"date-{key}")
-            _, trend = analyze(filtered, "trend", measure, date_column)
-            if not trend.empty:
+        compared = compare_periods(filtered, measure, date_column, category, rate) \
+            if measure and date_column and not numbers.empty else None
+        cards = st.columns(4)
+        if compared and compared["current"] is not None:
+            latest, previous = compared["latest"].strftime("%b %Y"), compared["previous"].strftime("%b %Y")
+            partial = tr(" (partial)", " (qayb)") if compared["partial"] else ""
+            delta = None
+            if compared["change"] is not None:
+                delta = f"{compared['change'] * 100:+.1f} pp" if rate else \
+                    f"{compared['pct']:+.1%}" if compared["pct"] is not None else "n/a"
+            cards[0].metric(f"{measure}, {latest}{partial}", show(compared["current"], unit), delta,
+                            delta_description=tr(f"vs {previous}", f"marka loo eego {previous}"), border=True)
+            cards[1].metric(f"{measure}, {previous}",
+                            show(compared["prior"], unit) if compared["prior"] is not None else "—",
+                            help=tr("No rows in this month." if compared["prior"] is None else None, "Bishan saf kuma jiro."
+                                    if compared["prior"] is None else None), border=True)
+            if target > 0:
+                remaining = target - compared["current"]
+                cards[2].metric(tr(f"Of {show(target, unit)} target", f"Hadafka {show(target, unit)}"),
+                                f"{compared['current'] / target:.1%}",
+                                tr(f"{show(abs(remaining), unit)} {'to go' if remaining > 0 else 'over'}",
+                                   f"{show(abs(remaining), unit)} {'ka haray' if remaining > 0 else 'ka badan'}"),
+                                delta_color="off", delta_arrow="off", border=True)
+            else:
+                cards[2].metric(tr("Average per row", "Celcelis saf kasta"), show(numbers.mean(), unit), border=True)
+            if compared["partial"]:
+                st.caption(tr(f"⚠ {latest} is partial: data runs to {filtered[date_column].max():%d %b %Y}. "
+                              "Compare it with a full month with care.",
+                              f"⚠ {latest} waa qayb: xogtu waxay ku egtahay {filtered[date_column].max():%d %b %Y}."))
+        elif measure and not numbers.empty:
+            cards[0].metric(tr("Average", "Celcelis") if rate else tr("Total", "Wadar"),
+                            show(numbers.mean() if rate else numbers.sum(), unit), border=True)
+            cards[1].metric(tr("Average per row", "Celcelis saf kasta"), show(numbers.mean(), unit), border=True)
+            cards[2].metric(tr("Blank cells", "Unugyo bannaan"), f"{filtered.isna().sum().sum():,}", border=True)
+        else:
+            cards[0].metric(tr("Columns", "Tiirar"), len(filtered.columns), border=True)
+            cards[1].metric(tr("Blank cells", "Unugyo bannaan"), f"{filtered.isna().sum().sum():,}", border=True)
+        cards[3].metric(tr("Rows in view", "Safafka muuqda"), f"{len(filtered):,}", border=True)
+
+        left, right = st.columns(2)
+        if date_column and not numbers.empty:
+            with left:
+                st.markdown("**" + tr(f"Monthly {measure}", f"{measure} bil kasta") + "**")
+                months = filtered[date_column].dt.to_period("M").astype("string")
+                monthly = filtered[measure].groupby(months)
+                trend = (monthly.mean() if rate else monthly.sum(min_count=1)).dropna().tail(36).to_frame(measure)
                 st.line_chart(percent_chart(trend))
+        if category:
+            with right if date_column and not numbers.empty else left:
+                labels = filtered[category].astype("string").fillna(tr("(Blank)", "(Bannaan)"))
+                if numbers.empty:
+                    st.markdown("**" + tr(f"Rows by {category}", f"Safafka {category} kasta") + "**")
+                    bars = labels.value_counts().head(15).rename(tr("Rows", "Safaf")).to_frame()
+                else:
+                    st.markdown("**" + tr(f"{measure} by {category}", f"{measure} {category} kasta") + "**")
+                    grouped = filtered[measure].groupby(labels)
+                    bars = percent_chart((grouped.mean() if rate else grouped.sum(min_count=1)).dropna()
+                                         .nlargest(15).to_frame(measure))
+                # Sorted horizontal bars, largest first; bars start at zero.
+                st.bar_chart(bars, horizontal=True, sort="-" + bars.columns[0])
+
+        table = compared["table"] if compared else None
+        if table is not None and table["Change"].notna().any():
+            worst, best = table["Change"].idxmin(), table["Change"].idxmax()
+            move = table.loc[worst, "Change"]
+            name, size = (worst, move) if move < 0 else (best, table.loc[best, "Change"])
+            amount = f"{abs(size) * 100:.1f} pp" if rate else show(abs(size), unit)
+            st.info(tr(f"**What to check next:** {name} had the largest {'decline' if size < 0 else 'increase'} in {measure}, "
+                       f"{amount} from {previous} to {latest}. Filter to {category} = {name} to see which rows drove it.",
+                       f"**Waxa xiga ee la hubiyo:** {name} ayaa ugu {'hoos u dhac' if size < 0 else 'kororka'} badnaa {measure}, "
+                       f"{amount} laga bilaabo {previous} ilaa {latest}. Shaandhee {category} = {name} si aad u aragto safafka."))
+            shown = table.copy()
+            shown.loc[tr("Total", "Wadar")] = [compared["prior"], compared["current"], compared["change"]]
+            if rate:
+                shown["Change"] = shown["Change"] * 100
+            else:
+                shown["% change"] = (shown["Change"] / shown["Previous"].abs()).where(shown["Previous"] != 0)
+            shown = shown.rename(columns={"Previous": previous, "Latest": latest,
+                                          "Change": tr("Change (pp)", "Isbeddel (pp)") if rate else tr("Change", "Isbeddel")})
+            value_format = "percent" if rate else "localized"
+            st.dataframe(shown, width="stretch", column_config={
+                previous: st.column_config.NumberColumn(format=value_format),
+                latest: st.column_config.NumberColumn(format=value_format),
+                "% change": st.column_config.NumberColumn(format="percent")})
+
+        st.markdown("**" + tr("Detail (first 100 rows)", "Faahfaahin (100 saf ee ugu horreeya)") + "**")
         st.dataframe(filtered.head(100), hide_index=True, width="stretch",
                      column_config=percent_columns(filtered))
+
+    applied = [label for label, on in [(tr("category cleanup", "midaynta qaybaha"), normalize),
+                                       (tr("invalid values blanked", "qiyamka khaldan la bannaanay"), clear_invalid),
+                                       (tr("duplicates removed", "safafka soo noqnoqday la saaray"), deduplicate)] if on]
+    st.caption(" · ".join(part for part in [
+        tr("Source: ", "Isha: ") + uploaded.name + (f" › {sheet}" if sheet else ""),
+        tr(f"{len(cleaned):,} of {len(frame):,} rows after cleaning", f"{len(cleaned):,} ka mid ah {len(frame):,} saf"),
+        tr("Cleaning: ", "Hagaajin: ") + (", ".join(applied) or tr("none", "midna")),
+        tr("Months are calendar months; the latest month is the most recent date in view.",
+           "Bilaha waa bilaha kalandarka; bisha ugu dambeysa waa taariikhda ugu dambeysa."),
+        tr("% measures are averages of row values.", "Cabbirada % waa celcelis qiyamka safafka.") if rate else "",
+        tr("Generated ", "La sameeyey ") + f"{datetime.now().astimezone():%d %b %Y %H:%M %Z}"] if part))
 
 with assistant:
     ai_enabled = st.checkbox(tr("Use OpenAI to interpret my question", "Adeegso OpenAI si loo fahmo su’aashayda"),

@@ -75,6 +75,44 @@ def plan(question, frame, use_ai):
     return operation, measure, grouping
 
 
+def compare_periods(frame, measure, date, group=None, rate=False):
+    """Latest calendar month vs the month before, overall and per group.
+
+    Rates (unit %) use the mean of row values and change in percentage points;
+    other measures use the sum. Percent change is n/a when the prior value is 0.
+    """
+    months = frame[date].dt.to_period("M")
+    latest = months[frame[measure].notna()].max()  # latest month that has values
+    if pd.isna(latest):
+        return None
+    previous = latest - 1
+
+    def combine(values):
+        return values.mean() if rate else values.sum(min_count=1)
+
+    def total(month):
+        values = frame.loc[months == month, measure].dropna()
+        return None if values.empty else float(combine(values))
+
+    current, prior = total(latest), total(previous)
+    change = None if current is None or prior is None else current - prior
+    result = {"latest": latest, "previous": previous, "current": current, "prior": prior,
+              "change": change, "pct": None if change is None or rate or prior == 0 else change / abs(prior),
+              # Partial only when the data itself ends inside the latest month.
+              "partial": bool(frame[date].max() < latest.end_time.normalize()), "table": None}
+    if group is not None:
+        recent = months.isin([previous, latest])
+        labels = frame.loc[recent, group].astype("string").fillna("(Blank)")
+        grouped = frame.loc[recent, measure].groupby([labels, months[recent]])
+        table = combine(grouped).unstack().reindex(columns=[previous, latest]).astype("Float64")
+        if not rate:
+            table = table.fillna(0)  # no rows in a month means nothing recorded; an average stays blank
+        table.columns = ["Previous", "Latest"]
+        table["Change"] = table["Latest"] - table["Previous"]
+        result["table"] = table.sort_values("Change", na_position="last")
+    return result
+
+
 def analyze(frame, operation, measure=None, group=None):
     if operation not in OPERATIONS:
         raise ValueError("unsupported")
