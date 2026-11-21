@@ -5,6 +5,7 @@ import math
 import os
 from pathlib import Path
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
@@ -83,8 +84,9 @@ def percent_chart(table):
 
 
 class Sample:
-    """The bundled sample, used like an uploaded file."""
-    name = "sample_finance.csv"
+    """A bundled sample file, used like an uploaded file."""
+    def __init__(self, name):
+        self.name = name
 
     def getvalue(self):
         return Path(__file__).with_name(self.name).read_bytes()
@@ -97,7 +99,7 @@ title_area.caption(tr("Upload a spreadsheet, check its quality, and see what cha
 # Once a file is loaded, the upload box and file settings fold into one line so the data comes first.
 loaded = st.session_state.get("upload") is not None or st.session_state.get("use_sample")
 if loaded:
-    current = st.session_state["upload"].name if st.session_state.get("upload") is not None else Sample.name
+    current = st.session_state["upload"].name if st.session_state.get("upload") is not None else st.session_state["use_sample"]
     file_panel = st.expander(f"📄 {current} — " + tr("change file or file settings", "beddel faylka ama dejinta"))
 else:
     file_panel = st.container()
@@ -106,7 +108,7 @@ uploaded = file_panel.file_uploader(tr("Upload Excel (.xlsx) or CSV, up to 20 MB
 if uploaded is not None:
     st.session_state.pop("use_sample", None)
 elif st.session_state.get("use_sample"):
-    uploaded = Sample()
+    uploaded = Sample(st.session_state["use_sample"])
     file_panel.caption(tr("🧪 Showing the sample file. Upload your own file above to replace it.",
                           "🧪 Waxaa muuqda faylka tusaalaha. Fayl kaaga ah kor ku soo geli si aad u beddesho."))
 else:
@@ -120,8 +122,12 @@ else:
         with column.container(border=True):
             st.markdown(f"#### {icon} {title}")
             st.caption(text)
-    if st.button(tr("Try it with sample sales data", "Ku tijaabi xog iib tusaale ah"), type="primary", icon="🧪"):
-        st.session_state["use_sample"] = True
+    try_hr, try_sales, _ = st.columns([1, 1, 2])
+    if try_hr.button(tr("Try sample: employees", "Tusaale: shaqaalaha"), type="primary", icon="👥", width="stretch"):
+        st.session_state["use_sample"] = "sample_hr.csv"
+        st.rerun()
+    if try_sales.button(tr("Try sample: sales", "Tusaale: iibka"), icon="🧪", width="stretch"):
+        st.session_state["use_sample"] = "sample_finance.csv"
         st.rerun()
     st.stop()
 
@@ -241,8 +247,76 @@ with review:
 numeric = list(cleaned.select_dtypes(include="number").columns)
 dates = list(cleaned.select_dtypes(include="datetime").columns)
 categories = [name for name in cleaned if name not in numeric + dates]
+# Groupings worth charting: a few to ~15 values. ID-like columns (almost every value unique) go last.
+distinct = {name: cleaned[name].nunique() for name in categories}
+useful = [name for name in categories if 2 <= distinct[name] <= 15 and distinct[name] < 0.5 * max(len(cleaned), 1)]
+categories = useful + [name for name in categories if name not in useful]
+
+# Office-style palette, as in Excel dashboards: blue, orange, gray, gold, light blue, green.
+PALETTE = ["#4472C4", "#ED7D31", "#A5A5A5", "#FFC000", "#5B9BD5", "#70AD47", "#264478", "#9E480E"]
+
+
+def axis_format(unit):
+    return {"%": ".0%", "$": "$~s"}.get(unit, "~s")
+
+
+def tip_format(unit):
+    return {"%": ".1%", "$": "$,.2f"}.get(unit, ",.2f")
+
+
+def titled(chart, title, height):
+    # Chart titles are drawn by the chart itself (plain text, centered like Excel).
+    return chart.properties(height=height, title=alt.TitleParams(title, anchor="middle", fontSize=15, fontWeight=500))
+
+
+def bar_chart(data, title, unit, horizontal=False, stacked=False, order=None, height=300):
+    """data has columns label, value and optionally series. Bars start at zero."""
+    has_series = "series" in data
+    label = alt.Y if horizontal else alt.X
+    value = alt.X if horizontal else alt.Y
+    encode = {
+        ("y" if horizontal else "x"): label("label:N", sort=order, title=None,
+                                            axis=alt.Axis(labelAngle=0, labelLimit=160)),
+        ("x" if horizontal else "y"): value("value:Q", title=None, stack="zero" if stacked else None,
+                                            axis=alt.Axis(format=axis_format(unit))),
+        "color": alt.Color("series:N", title=None, scale=alt.Scale(range=PALETTE),
+                           legend=alt.Legend(orient="bottom")) if has_series else alt.value(PALETTE[0]),
+        "tooltip": [alt.Tooltip("label:N", title=" "), *([alt.Tooltip("series:N", title=" ")] if has_series else []),
+                    alt.Tooltip("value:Q", title=" ", format=tip_format(unit))],
+    }
+    if has_series and not stacked:
+        encode["yOffset" if horizontal else "xOffset"] = alt.XOffset("series:N") if not horizontal else alt.YOffset("series:N")
+    return titled(alt.Chart(data).mark_bar().encode(**encode), title, height)
+
+
+def donut(data, title, unit, order):
+    """Share ring. `order` fixes each label's color across donuts (the overall top 5, then Other)."""
+    other = tr("Other", "Kale")
+    data = data.assign(label=data["label"].where(data["label"].isin(order[:5]), other))
+    data = data.groupby("label", as_index=False)["value"].sum()
+    data = data.assign(share=data["value"] / data["value"].sum())
+    ranked = [label for label in [*order[:5], other] if label in set(data["label"])]
+    data = data.set_index("label").loc[ranked].reset_index()
+    data["name"] = [f"{label} {share:.0%}" for label, share in zip(data["label"], data["share"])]
+    colors = [PALETTE[[*order[:5], other].index(label) % len(PALETTE)] for label in ranked]
+    chart = alt.Chart(data).mark_arc(innerRadius=42, outerRadius=70).encode(
+        theta="value:Q", order=alt.Order("value:Q", sort="descending"),
+        color=alt.Color("name:N", title=None, sort=list(data["name"]),
+                        scale=alt.Scale(domain=list(data["name"]), range=colors),
+                        legend=alt.Legend(orient="bottom", columns=2, labelLimit=120)),
+        tooltip=[alt.Tooltip("label:N", title=" "), alt.Tooltip("value:Q", title=" ", format=tip_format(unit)),
+                 alt.Tooltip("share:Q", title=" ", format=".1%")])
+    # Ring sized to leave room for the title above and up to three legend rows below.
+    return titled(chart, title, 300).properties(padding={"top": 28, "left": 4, "right": 4, "bottom": 4})
+
+
+def combine(values, keys, rate):
+    grouped = values.groupby(keys, observed=True)
+    return grouped.mean() if rate else grouped.sum(min_count=1)
+
+
 with dashboard:
-    # Reading order: purpose and period, KPIs, trend, segment comparison, what to check, detail, notes.
+    # Excel-style report: headline numbers, a grid of chart cards, share donuts, then the month comparison.
     blocked = {column: values for column, values in invalid.items()
                if not values.empty and settings[column][0] in ("Number", "Date") and not clear_invalid}
     variants = int(report["Category variants"].sum())
@@ -263,24 +337,20 @@ with dashboard:
     header = st.container()
     controls = st.container(border=True)
     picks = controls.columns(4)
-    measure = picks[0].selectbox(tr("Measure", "Cabbirka"), numeric, key=f"measure-{key}") if numeric else None
+    ROWS = tr("Row count", "Tirada safafka")  # counts rows, like "Headcount"
+    measure = picks[0].selectbox(tr("Measure", "Cabbirka"), [*numeric, ROWS], key=f"measure-{key}")
     date_column = picks[1].selectbox(tr("Date", "Taariikhda"), dates, key=f"date-{key}") if dates else None
-    category = picks[2].selectbox(tr("Compare by", "Isbarbardhig"), categories, key=f"category-{key}") if categories else None
-    unit = settings[measure][2] if measure else ""
+    # Default to the richest useful grouping (like Department); the split takes the smallest (like Gender).
+    default_category = max(useful, key=lambda name: distinct[name]) if useful else None
+    category = picks[2].selectbox(tr("Compare by", "Isbarbardhig"), categories, key=f"category-{key}",
+                                  index=categories.index(default_category) if default_category else 0) if categories else None
+    unit = settings[measure][2] if measure in settings else ""
     rate = unit == "%"
-    lag = 1
-    if date_column and measure:
-        lag = picks[3].segmented_control(tr("Compare with", "Is barbar dhig"), [1, 12], default=1, key=f"lag-{key}",
-                                         format_func=lambda months: tr("Last month", "Bishii hore") if months == 1
-                                         else tr("Last year", "Sannadkii hore")) or 1
+
     filtered = cleaned
     active = tr("All rows", "Dhammaan safafka")
     filter_key = f"filter-{key}"
-    pick_filter, pick_values, pick_target, pick_reset = controls.columns([2, 3, 2, 1], vertical_alignment="bottom")
-    target = 0.0
-    if measure and not rate:
-        target = pick_target.number_input(tr("Monthly target (optional)", "Hadafka bishii (ikhtiyaari)"),
-                                          min_value=0.0, value=0.0, key=f"target-{key}")
+    pick_filter, pick_values, pick_year, pick_reset = controls.columns([2, 3, 2, 1], vertical_alignment="bottom")
     filter_column = pick_filter.selectbox(tr("Filter", "Shaandhayn"), [None, *cleaned.columns], key=filter_key,
                                           format_func=lambda name: name if name is not None else tr("All rows", "Dhammaan safafka"))
     pick_reset.button(tr("Reset", "Dib u celi"), on_click=lambda: st.session_state.update({filter_key: None}),
@@ -316,117 +386,184 @@ with dashboard:
                         filtered = cleaned[labels.isin(chosen)]
                         active = f"{filter_column}: {', '.join(chosen)}"
 
+    # "Select Year", as in Excel reports. All years by default.
+    year = None
+    if date_column and filtered[date_column].notna().any():
+        years = sorted(int(y) for y in filtered[date_column].dt.year.dropna().unique())
+        year = pick_year.selectbox(tr("Year", "Sannadka"), [None, *years], key=f"year-{key}",
+                                   format_func=lambda y: tr("All years", "Dhammaan sannadaha") if y is None else str(y))
+        if year is not None:
+            filtered = filtered[filtered[date_column].dt.year == year]
+            active += f" · {year}"
+
+    # Split by: a second grouping with a few values (like Gender), for grouped and stacked charts.
+    splits = [name for name in categories if name != category and 2 <= filtered[name].nunique() <= 8]
+    split = picks[3].selectbox(tr("Split by", "U kala qaad"), [None, *sorted(splits, key=lambda n: filtered[n].nunique())],
+                               index=1 if splits else 0, key=f"split-{key}",
+                               format_func=lambda name: tr("No split", "Ha kala qaadin") if name is None else name)
+
+    view = filtered.assign(**{ROWS: 1}) if measure == ROWS else filtered  # adds the count column when needed
     period = ""
     if date_column and filtered[date_column].notna().any():
         period = f"{filtered[date_column].min():%d %b %Y} – {filtered[date_column].max():%d %b %Y}"
     with header:
-        st.subheader(tr(f"{measure} overview", f"Dulmarka {measure}") if measure else tr("Data overview", "Dulmarka xogta"),
-                     anchor=False)
+        st.subheader(tr(f"{measure} overview", f"Dulmarka {measure}"), anchor=False)
         st.caption(" · ".join(part for part in [
             period and tr("Period: ", "Muddada: ") + period,
             tr("Filter: ", "Shaandhayn: ") + active,
             tr(f"{len(filtered):,} rows", f"{len(filtered):,} saf")] if part))
 
-    numbers = filtered[measure].dropna() if measure else pd.Series(dtype="Float64")
+    numbers = view[measure].dropna()
     if filtered.empty:
         st.info(tr("No rows match this filter. Press Reset to see all rows.",
                    "Shaandhayntan saf uma soo bixin. Riix Dib u celi si aad u aragto dhammaan safafka."))
     else:
-        compared = compare_periods(filtered, measure, date_column, category, rate, lag) \
-            if measure and date_column and not numbers.empty else None
-        cards = st.columns(4)
-        if compared and compared["current"] is not None:
-            latest, previous = compared["latest"].strftime("%b %Y"), compared["previous"].strftime("%b %Y")
-            partial = tr(" (partial)", " (qayb)") if compared["partial"] else ""
-            delta = None
-            if compared["change"] is not None:
-                delta = f"{compared['change'] * 100:+.1f} pp" if rate else \
-                    f"{compared['pct']:+.1%}" if compared["pct"] is not None else "n/a"
-            cards[0].metric(f"{measure}, {latest}{partial}", show(compared["current"], unit), delta,
-                            delta_description=tr(f"vs {previous}", f"marka loo eego {previous}"), border=True)
-            cards[1].metric(f"{measure}, {previous}",
-                            show(compared["prior"], unit) if compared["prior"] is not None else "—",
-                            help=tr("No rows in this month." if compared["prior"] is None else None, "Bishan saf kuma jiro."
-                                    if compared["prior"] is None else None), border=True)
-            if target > 0:
-                remaining = target - compared["current"]
-                cards[2].metric(tr(f"Of {show(target, unit)} target", f"Hadafka {show(target, unit)}"),
-                                f"{compared['current'] / target:.1%}",
-                                tr(f"{show(abs(remaining), unit)} {'to go' if remaining > 0 else 'over'}",
-                                   f"{show(abs(remaining), unit)} {'ka haray' if remaining > 0 else 'ka badan'}"),
-                                delta_color="off", delta_arrow="off", border=True)
-            else:
-                cards[2].metric(tr("Average per row", "Celcelis saf kasta"), show(numbers.mean(), unit), border=True)
-            if compared["partial"]:
-                st.caption(tr(f"⚠ {latest} is partial: data runs to {filtered[date_column].max():%d %b %Y}. "
-                              "Compare it with a full month with care.",
-                              f"⚠ {latest} waa qayb: xogtu waxay ku egtahay {filtered[date_column].max():%d %b %Y}."))
-        elif measure and not numbers.empty:
-            cards[0].metric(tr("Average", "Celcelis") if rate else tr("Total", "Wadar"),
-                            show(numbers.mean() if rate else numbers.sum(), unit), border=True)
-            cards[1].metric(tr("Average per row", "Celcelis saf kasta"), show(numbers.mean(), unit), border=True)
-            cards[2].metric(tr("Blank cells", "Unugyo bannaan"), f"{filtered.isna().sum().sum():,}", border=True)
-        else:
-            cards[0].metric(tr("Columns", "Tiirar"), len(filtered.columns), border=True)
-            cards[1].metric(tr("Blank cells", "Unugyo bannaan"), f"{filtered.isna().sum().sum():,}", border=True)
-        cards[3].metric(tr("Rows in view", "Safafka muuqda"), f"{len(filtered):,}", border=True)
+        # 1 · Headline numbers: totals of every number column (averages for %), rows, and an average.
+        headline = [(tr(f"Average {name}", f"Celcelis {name}") if is_rate(name) else tr(f"Total {name}", f"Wadarta {name}"),
+                     show(filtered[name].mean() if is_rate(name) else filtered[name].sum(), settings[name][2]))
+                    for name in numeric if filtered[name].notna().any()][:6]
+        headline.append((tr("Total rows", "Wadarta safafka"), f"{len(filtered):,}"))
+        amount = next((name for name in numeric if not is_rate(name) and filtered[name].notna().any()), None)
+        if amount:
+            headline.append((tr(f"Average {amount}", f"Celcelis {amount}"), show(filtered[amount].mean(), settings[amount][2])))
+        with st.container(border=True):
+            for start in range(0, len(headline), 8):
+                row = headline[start:start + 8]
+                for column, (label, value) in zip(st.columns(len(row)), row):
+                    column.metric(label, value)
 
-        left, right = st.columns(2)
+        if not numbers.empty:
+            # 2 · Growth over time, alone and split.
+            if date_column:
+                by_year = year is None and view[date_column].dt.year.nunique() > 1
+                periods = view[date_column].dt.year.astype("Int64").astype("string") if by_year \
+                    else view[date_column].dt.to_period("M").astype("string")
+                when = tr("year", "sannad") if by_year else tr("month", "bil")
+                left, right = st.columns(2)
+                growth = combine(view[measure], periods, rate).dropna().rename_axis("label").reset_index(name="value")
+                with left.container(border=True):
+                    st.altair_chart(bar_chart(growth, tr(f"{measure} by {when}", f"{measure} {when} kasta"), unit), width="stretch")
+                with right.container(border=True):
+                    if split:
+                        parts = combine(view[measure], [periods, view[split].astype("string").fillna("(Blank)")], rate)
+                        parts = parts.dropna().rename_axis(["label", "series"]).reset_index(name="value")
+                        st.altair_chart(bar_chart(parts, tr(f"{measure} by {when} and {split}", f"{measure} {when} iyo {split}"), unit),
+                                        width="stretch")
+                    else:
+                        st.caption(tr("Choose a Split by column to compare groups over time.",
+                                      "Dooro tiir aad ku kala qaaddo si aad kooxaha u isbarbardhigto."))
+
+            # 3 · By category, alone and stacked by the split.
+            if category:
+                labels = view[category].astype("string").fillna(tr("(Blank)", "(Bannaan)"))
+                totals = combine(view[measure], labels, rate).dropna().nlargest(12)
+                order = list(totals.index)
+                tall = max(300, 30 * len(order) + 90)  # room for every label plus the legend
+                left, right = st.columns(2)
+                with left.container(border=True):
+                    st.altair_chart(bar_chart(totals.rename_axis("label").reset_index(name="value"),
+                                              tr(f"{measure} by {category}", f"{measure} {category} kasta"), unit,
+                                              horizontal=True, order=order, height=tall), width="stretch")
+                with right.container(border=True):
+                    if split:
+                        inside = labels.isin(order)
+                        parts = combine(view.loc[inside, measure],
+                                        [labels[inside], view.loc[inside, split].astype("string").fillna("(Blank)")], rate)
+                        parts = parts.dropna().rename_axis(["label", "series"]).reset_index(name="value")
+                        # Averages don't add up, so % measures are shown side by side instead of stacked.
+                        st.altair_chart(bar_chart(parts, tr(f"{measure} by {category} and {split}", f"{measure} {category} iyo {split}"),
+                                                  unit, horizontal=True, stacked=not rate, order=order, height=tall), width="stretch")
+                    else:
+                        st.caption(tr("Choose a Split by column to see each category's mix.",
+                                      "Dooro tiir aad ku kala qaaddo si aad u aragto qaybaha."))
+
+                # 4 · Share donuts: overall, then one per split group (largest three).
+                share_by = next((name for name in useful if name not in (category, split) and distinct[name] <= 8), category)
+                share_of = ROWS if rate else measure  # shares of an average mean nothing; use row counts
+                share_view = view.assign(**{ROWS: 1})
+                donuts = [(tr(f"{share_of} by {share_by}", f"{share_of} {share_by} kasta"), share_view)]
+                if split:
+                    groups = combine(share_view[share_of], share_view[split].astype("string"), False).nlargest(3).index
+                    donuts += [(f"{group}: {share_of} by {share_by}" if language == "English" else f"{group}: {share_of} {share_by} kasta",
+                                share_view[share_view[split].astype("string") == group]) for group in groups]
+                overall = combine(share_view[share_of], share_view[share_by].astype("string").fillna("(Blank)"), False)
+                order = list(overall.dropna().sort_values(ascending=False).index)
+                for column, (title, part) in zip(st.columns(len(donuts)), donuts):
+                    shares = combine(part[share_of], part[share_by].astype("string").fillna("(Blank)"), False).dropna()
+                    shares = shares[shares > 0]
+                    if not shares.empty:
+                        with column.container(border=True):
+                            st.altair_chart(donut(shares.rename_axis("label").reset_index(name="value"), title,
+                                                  "" if share_of == ROWS else unit, order), width="stretch")
+
+        # 5 · Month comparison: latest month vs last month or last year, and what to check next.
         if date_column and not numbers.empty:
-            with left.container(border=True):
-                st.markdown("**" + tr(f"Monthly {measure}", f"{measure} bil kasta") + "**")
-                months = filtered[date_column].dt.to_period("M")
-                monthly = filtered[measure].groupby(months)
-                trend = (monthly.mean() if rate else monthly.sum(min_count=1)).dropna()
-                if not trend.empty:
-                    every_month = pd.period_range(trend.index.min(), trend.index.max(), freq="M")
-                    trend = trend.reindex(every_month).tail(36)
-                    trend.index = trend.index.strftime("%Y-%m")
-                    st.line_chart(chart_ready(percent_chart(trend.to_frame(measure))), height=300)
-        if category:
-            with (right if date_column and not numbers.empty else left).container(border=True):
-                labels = filtered[category].astype("string").fillna(tr("(Blank)", "(Bannaan)"))
-                if numbers.empty:
-                    st.markdown("**" + tr(f"Rows by {category}", f"Safafka {category} kasta") + "**")
-                    bars = labels.value_counts().head(15).rename(tr("Rows", "Safaf")).to_frame()
-                else:
-                    st.markdown("**" + tr(f"{measure} by {category}", f"{measure} {category} kasta") + "**")
-                    grouped = filtered[measure].groupby(labels)
-                    bars = percent_chart((grouped.mean() if rate else grouped.sum(min_count=1)).dropna()
-                                         .nlargest(15).to_frame(measure))
-                # Sorted horizontal bars, largest first; bars start at zero.
-                bars = chart_ready(bars)
-                st.bar_chart(bars, horizontal=True, sort="-" + bars.columns[0], height=300)
-
-        table = compared["table"] if compared else None
-        if table is not None and table["Change"].notna().any():
             with st.container(border=True):
-                st.markdown("**" + tr(f"{measure} by {category}: {previous} vs {latest}",
-                                      f"{measure} {category} kasta: {previous} iyo {latest}") + "**")
-                worst, best = table["Change"].idxmin(), table["Change"].idxmax()
-                move = table.loc[worst, "Change"]
-                name, size = (worst, move) if move < 0 else (best, table.loc[best, "Change"])
-                amount = f"{abs(size) * 100:.1f} pp" if rate else show(abs(size), unit)
-                st.info(tr(f"**What to check next:** {name} had the largest {'decline' if size < 0 else 'increase'} in {measure}, "
-                           f"{amount} from {previous} to {latest}. Filter to {category} = {name} to see which rows drove it.",
-                           f"**Waxa xiga ee la hubiyo:** {name} ayaa ugu {'hoos u dhac' if size < 0 else 'kororka'} badnaa {measure}, "
-                           f"{amount} laga bilaabo {previous} ilaa {latest}. Shaandhee {category} = {name} si aad u aragto safafka."))
-                shown = table.copy()
-                shown.loc[tr("Total", "Wadar")] = [compared["prior"], compared["current"], compared["change"]]
-                if rate:
-                    shown["Change"] = shown["Change"] * 100
+                head, pick_lag, pick_target = st.columns([3, 2, 2], vertical_alignment="bottom")
+                head.markdown("**" + tr("Latest month compared", "Bisha ugu dambeysa iyo isbarbardhigga") + "**")
+                lag = pick_lag.segmented_control(tr("Compare with", "Is barbar dhig"), [1, 12], default=1, key=f"lag-{key}",
+                                                 format_func=lambda months: tr("Last month", "Bishii hore") if months == 1
+                                                 else tr("Last year", "Sannadkii hore")) or 1
+                target = 0.0
+                if not rate:
+                    target = pick_target.number_input(tr("Monthly target (optional)", "Hadafka bishii (ikhtiyaari)"),
+                                                      min_value=0.0, value=0.0, key=f"target-{key}")
+                compared = compare_periods(view, measure, date_column, category, rate, lag)
+                if compared and compared["current"] is not None:
+                    latest, previous = compared["latest"].strftime("%b %Y"), compared["previous"].strftime("%b %Y")
+                    partial = tr(" (partial)", " (qayb)") if compared["partial"] else ""
+                    delta = None
+                    if compared["change"] is not None:
+                        delta = f"{compared['change'] * 100:+.1f} pp" if rate else \
+                            f"{compared['pct']:+.1%}" if compared["pct"] is not None else "n/a"
+                    cards = st.columns(4)
+                    cards[0].metric(f"{measure}, {latest}{partial}", show(compared["current"], unit), delta,
+                                    delta_description=tr(f"vs {previous}", f"marka loo eego {previous}"), border=True)
+                    cards[1].metric(f"{measure}, {previous}",
+                                    show(compared["prior"], unit) if compared["prior"] is not None else "—", border=True,
+                                    help=tr("No rows in this month.", "Bishan saf kuma jiro.") if compared["prior"] is None else None)
+                    if target > 0:
+                        remaining = target - compared["current"]
+                        cards[2].metric(tr(f"Of {show(target, unit)} target", f"Hadafka {show(target, unit)}"),
+                                        f"{compared['current'] / target:.1%}",
+                                        tr(f"{show(abs(remaining), unit)} {'to go' if remaining > 0 else 'over'}",
+                                           f"{show(abs(remaining), unit)} {'ka haray' if remaining > 0 else 'ka badan'}"),
+                                        delta_color="off", delta_arrow="off", border=True)
+                    else:
+                        cards[2].metric(tr("Average per row", "Celcelis saf kasta"), show(numbers.mean(), unit), border=True)
+                    cards[3].metric(tr("Rows in view", "Safafka muuqda"), f"{len(filtered):,}", border=True)
+                    if compared["partial"]:
+                        st.caption(tr(f"⚠ {latest} is partial: data runs to {view[date_column].max():%d %b %Y}. "
+                                      "Compare it with a full month with care.",
+                                      f"⚠ {latest} waa qayb: xogtu waxay ku egtahay {view[date_column].max():%d %b %Y}."))
+                    table = compared["table"]
+                    if table is not None and table["Change"].notna().any():
+                        worst, best = table["Change"].idxmin(), table["Change"].idxmax()
+                        move = table.loc[worst, "Change"]
+                        name, size = (worst, move) if move < 0 else (best, table.loc[best, "Change"])
+                        amount_text = f"{abs(size) * 100:.1f} pp" if rate else show(abs(size), unit)
+                        st.info(tr(f"**What to check next:** {name} had the largest {'decline' if size < 0 else 'increase'} in {measure}, "
+                                   f"{amount_text} from {previous} to {latest}. Filter to {category} = {name} to see which rows drove it.",
+                                   f"**Waxa xiga ee la hubiyo:** {name} ayaa ugu {'hoos u dhac' if size < 0 else 'kororka'} badnaa {measure}, "
+                                   f"{amount_text} laga bilaabo {previous} ilaa {latest}. Shaandhee {category} = {name} si aad u aragto safafka."))
+                        shown = table.copy()
+                        shown.loc[tr("Total", "Wadar")] = [compared["prior"], compared["current"], compared["change"]]
+                        if rate:
+                            shown["Change"] = shown["Change"] * 100
+                        else:
+                            shown["% change"] = (shown["Change"] / shown["Previous"].abs()).where(shown["Previous"] != 0)
+                        shown = shown.rename(columns={"Previous": previous, "Latest": latest,
+                                                      "Change": tr("Change (pp)", "Isbeddel (pp)") if rate else tr("Change", "Isbeddel")})
+                        change_column = shown.columns[2]
+                        formats = {previous: lambda v: show(v, unit), latest: lambda v: show(v, unit),
+                                   change_column: (lambda v: f"{v:+.1f} pp") if rate else (lambda v: ("+" if v > 0 else "") + show(v, unit)),
+                                   "% change": lambda v: f"{v:+.1%}"}
+                        text = shown.astype(object).apply(lambda column: column.map(
+                            lambda v: "—" if pd.isna(v) else formats.get(column.name, str)(v)))
+                        st.dataframe(text, width="stretch", column_config={
+                            name: st.column_config.TextColumn(alignment="right") for name in text.columns})
                 else:
-                    shown["% change"] = (shown["Change"] / shown["Previous"].abs()).where(shown["Previous"] != 0)
-                shown = shown.rename(columns={"Previous": previous, "Latest": latest,
-                                              "Change": tr("Change (pp)", "Isbeddel (pp)") if rate else tr("Change", "Isbeddel")})
-                change_column = shown.columns[2]
-                formats = {previous: lambda v: show(v, unit), latest: lambda v: show(v, unit),
-                           change_column: (lambda v: f"{v:+.1f} pp") if rate else (lambda v: ("+" if v > 0 else "") + show(v, unit)),
-                           "% change": lambda v: f"{v:+.1%}"}
-                text = shown.astype(object).apply(lambda column: column.map(
-                    lambda v: "—" if pd.isna(v) else formats.get(column.name, str)(v)))
-                st.dataframe(text, width="stretch", column_config={
-                    name: st.column_config.TextColumn(alignment="right") for name in text.columns})
+                    st.caption(tr("No month with values in this view.", "Bil qiyam leh kuma jirto muuqaalkan."))
 
         with st.expander(tr(f"Detail: first 100 of {len(filtered):,} rows", f"Faahfaahin: 100 ka mid ah {len(filtered):,} saf"),
                          icon="📋"):

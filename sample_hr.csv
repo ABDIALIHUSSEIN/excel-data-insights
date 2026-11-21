@@ -1,0 +1,115 @@
+Employee ID,Hire Date,Department,Gender,City,Salary,Bonus,PTO Days
+E1001,2017-07-22,Finance,Other,Mogadishu,"$60,000","$4,420",23
+E1002,2017-04-20,Sales,Male,Hargeisa,"$49,200","$1,170",18
+E1003,2017-10-10,R&D,Female,Mogadishu,"$51,800","$1,680",25
+E1004,2017-07-23,Sales,Male,Mogadishu,"$59,700","$1,490",6
+E1005,2017-05-29,Accounting,Male,Kismayo,"$42,200","$3,250",26
+E1006,2017-10-20,Marketing,Female,Mogadishu,"$63,200","$5,300",8
+E1007,2018-10-16,Accounting,Male,Hargeisa,"$57,700","$5,080",29
+E1008,2018-08-21,Finance,Male,Mogadishu,"$65,100","$3,660",30
+E1009,2018-05-05,Marketing,Male,Mogadishu,"$64,500","$4,480",28
+E1010,2018-02-07,Administration,Female,Hargeisa,"$44,600","$1,420",10
+E1011,2018-09-08,Finance,Female,Kismayo,"$38,100","$1,060",23
+E1012,2018-06-29,Finance,Female,Baidoa,"$75,400","$5,990",30
+E1013,2018-02-17,Administration,Female,Mogadishu,"$49,300","$4,260",28
+E1014,2018-12-15,Human Resources,Male,Mogadishu,"$43,700","$4,470",27
+E1015,2018-06-27,Customer Support,Male,Mogadishu,"$43,300","$1,590",20
+E1016,2019-05-28,Sales,Female,Mogadishu,"$53,400","$1,760",17
+E1017,2019-09-12,Customer Support,Male,Mogadishu,"$42,400","$3,180",18
+E1018,2019-08-01,Accounting,Female,Garowe,"$56,800","$6,740",17
+E1019,2019-04-01,IT,Female,Baidoa,"$77,600","$1,650",10
+E1020,2019-03-16,Human Resources,Female,Mogadishu,"$56,500","$3,500",24
+E1021,2019-12-20,Finance,Other,Mogadishu,"$79,200","$6,770",19
+E1022,2019-07-24,Accounting,Female,Hargeisa,"$34,900","$2,070",25
+E1023,2019-02-04,Customer Support,Female,Baidoa,"$43,200","$1,340",6
+E1024,2020-03-18,R&D,Female,Mogadishu,"$71,500","$5,270",24
+E1025,2020-04-16,Sales,Female,Mogadishu,"$48,200","$2,180",24
+E1026,2020-02-29,Finance,Male,Hargeisa,"$58,400","$6,130",20
+E1027,2020-03-14,Administration,Female,Mogadishu,"$46,900","$2,180",21
+E1028,2020-09-27,Sales,Female,Kismayo,"$56,900","$3,200",5
+E1029,2020-11-25,Accounting,Female,Mogadishu,"$61,100","$2,820",10
+E1030,2020-09-29,Finance,Male,Kismayo,"$49,800","$3,690",15
+E1031,2020-04-09,IT,Male,Mogadishu,"$75,100","$7,060",11
+E1032,2020-01-15,Accounting,Male,Mogadishu,"$36,400","$4,330",20
+E1033,2020-11-05,Human Resources,Female,Mogadishu,"$55,300","$6,290",16
+E1034,2020-04-26,R&D,Female,Mogadishu,"$69,100","$4,630",11
+E1035,2020-11-08,Administration,Male,Garowe,"$46,000","$3,920",7
+E1036,2021-12-31,R&D,Male,Hargeisa,"$60,700","$5,770",10
+E1037,2021-06-20,Customer Support,Male,Hargeisa,"$49,400","$4,550",17
+E1038,2021-03-29,R&D,Male,Mogadishu,"$88,600","$10,570",9
+E1039,2021-03-16,Administration,Male,Mogadishu,"$34,200","$2,310",9
+E1040,2021-01-11,Accounting,Male,Garowe,"$44,200",$950,8
+E1041,2021-03-13,Accounting,Male,Mogadishu,"$35,300","$3,620",5
+E1042,2021-09-14,Human Resources,Female,Baidoa,"$53,400","$2,350",15
+E1043,2021-03-09,Human Resources,Male,Garowe,"$59,100","$6,490",23
+E1044,2021-09-14,Accounting,Female,Mogadishu,"$57,500","$1,900",21
+E1045,2021-08-14,Accounting,Female,Mogadishu,"$54,000","$5,270",10
+E1046,2022-03-03,Marketing,Male,Mogadishu,"$43,800","$3,310",26
+E1047,2022-09-05,Accounting,Male,Mogadishu,"$52,900","$4,020",11
+E1048,2022-02-20,Human Resources,Female,Kismayo,"$43,100","$3,050",5
+E1049,2022-11-10,R&D,Female,Mogadishu,"$89,800","$3,590",19
+E1050,2022-09-02,Accounting,Male,Mogadishu,"$50,000","$3,540",27
+E1051,2022-05-13,Accounting,Male,Hargeisa,"$68,800","$2,770",9
+E1052,2022-08-15,Customer Support,Female,Garowe,"$30,200","$1,560",12
+E1053,2022-12-09,Customer Support,Female,Garowe,"$35,400","$3,460",26
+E1054,2022-03-12,Finance,Female,Mogadishu,"$67,600","$7,890",28
+E1055,2022-09-07,R&D,Female,Hargeisa,"$82,500","$3,500",21
+E1056,2022-04-11,Customer Support,Female,Mogadishu,"$44,400","$2,470",28
+E1057,2022-10-11,Finance,Female,Kismayo,"$46,100","$2,690",24
+E1058,2022-02-02,Human Resources,Male,Mogadishu,"$50,000","$1,560",8
+E1059,2022-01-21,R&D,Female,Hargeisa,"$79,400","$7,590",26
+E1060,2023-10-02,Human Resources,Female,Baidoa,"$43,900","$4,910",20
+E1061,2023-01-30,Finance,Female,Mogadishu,"$64,500","$7,060",5
+E1062,2023-02-12,R&D,Male,Mogadishu,"$65,200","$5,270",7
+E1063,2023-08-21,Human Resources,Male,Mogadishu,"$72,800","$4,500",24
+E1064,2023-12-30,Marketing,Female,Mogadishu,"$59,500","$2,610",10
+E1065,2023-04-14,Human Resources,Female,Mogadishu,"$57,200","$4,180",14
+E1066,2023-04-02,Administration,Male,Mogadishu,"$37,400","$1,760",13
+E1067,2023-09-16,Sales,Female,Hargeisa,"$46,500","$3,140",8
+E1068,2023-10-07,Customer Support,Male,Hargeisa,"$35,100","$3,630",21
+E1069,2023-04-28,Human Resources,Male,Garowe,"$38,400","$3,480",9
+E1070,2023-01-28,Customer Support,Other,Mogadishu,"$46,300","$4,800",7
+E1071,2023-01-29,Human Resources,Female,Garowe,"$60,200","$6,440",14
+E1072,2023-01-24,IT,Male,Mogadishu,"$79,000","$5,210",13
+E1073,2024-07-05,Administration,Female,Mogadishu,"$60,400","$4,510",6
+E1074,2024-04-03,Human Resources,Female,Hargeisa,"$41,600",$840,7
+E1075,2024-12-01,Administration,Female,Mogadishu,"$44,200",$910,7
+E1076,2024-01-22,Marketing,Female,Mogadishu,"$68,400","$4,060",14
+E1077,2024-09-27,IT,Female,Baidoa,"$71,700","$7,840",17
+E1078,2024-09-10,Finance,Male,Baidoa,"$57,400","$2,010",25
+E1079,2024-09-19,Marketing,Female,Mogadishu,"$46,000","$4,660",21
+E1080,2024-01-09,Accounting,Male,Baidoa,"$41,500","$4,260",30
+E1081,2024-01-22,IT,Female,Hargeisa,"$75,000","$2,290",22
+E1082,2024-11-16,Sales,Male,Mogadishu,"$58,300","$4,260",20
+E1083,2024-02-05,Human Resources,Female,Garowe,"$46,700","$3,430",21
+E1084,2024-08-30,R&D,Male,Mogadishu,"$57,900","$2,620",13
+E1085,2024-04-15,IT,Male,Hargeisa,"$69,600","$4,600",7
+E1086,2024-05-27,Administration,Male,Baidoa,"$52,000","$5,030",25
+E1087,2024-03-16,IT,Female,Baidoa,"$59,300","$5,290",23
+E1088,2024-02-01,Marketing,Female,Garowe,"$69,700","$4,780",8
+E1089,2025-05-29,IT,Male,Mogadishu,"$65,100","$4,330",22
+E1090,2025-02-13,IT,Female,Mogadishu,"$58,300","$6,620",14
+E1091,2025-09-17,Administration,Female,Mogadishu,"$49,300","$2,310",11
+E1092,2025-03-14,R&D,Male,Mogadishu,"$70,100","$6,640",16
+E1093,2025-11-20,Marketing,Male,Mogadishu,"$36,600","$3,310",20
+E1094,2025-03-23,Administration,Female,Hargeisa,"$40,800",$830,26
+E1095,2025-03-14,Administration,Female,Mogadishu,"$35,600","$1,140",5
+E1096,2025-07-23,Finance,Male,Mogadishu,"$67,700","$2,170",27
+E1097,2025-05-29,Sales,Male,Baidoa,"$51,900","$3,060",7
+E1098,2025-05-21,Finance,Male,Mogadishu,"$66,400","$7,000",8
+E1099,2025-05-27,Sales,Male,Hargeisa,"$48,600","$5,690",21
+E1100,2025-07-11,Finance,Female,Hargeisa,"$57,800","$5,690",5
+E1101,2025-10-11,Customer Support,Male,Hargeisa,"$26,800",$670,19
+E1102,2025-05-27,Marketing,Male,Kismayo,"$52,400","$3,590",9
+E1103,2025-06-25,Marketing,Male,Garowe,"$55,700","$5,230",13
+E1104,2026-06-04,Customer Support,Male,Garowe,"$41,100","$2,810",17
+E1105,2026-03-24,R&D,Female,Kismayo,"$86,000","$8,700",12
+E1106,2026-08-19,Administration,Male,Kismayo,"$45,500","$2,850",11
+E1107,2026-06-25,IT,Female,Baidoa,"$58,000","$3,300",11
+E1108,2026-07-31,Sales,Male,Kismayo,"$49,300","$2,870",11
+E1109,2026-02-01,Customer Support,Female,Garowe,"$28,200","$1,580",21
+E1110,2026-04-21,Accounting,Male,Mogadishu,"$52,100","$1,520",17
+E1111,2026-08-10,Customer Support,Male,Mogadishu,"$48,100","$5,160",9
+E1112,2026-08-31,Sales,Female,Hargeisa,"$47,000","$5,490",5
+E1113,2026-09-28,R&D,Female,Mogadishu,"$93,600","$4,200",12
+E1114,2026-02-25,Marketing,Female,Garowe,"$36,300","$4,140",29
