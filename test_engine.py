@@ -77,3 +77,26 @@ y = compare_periods(yearly, "Revenue", "Date", lag=12)
 assert (str(y["previous"]), y["prior"], y["change"], y["pct"]) == ("2025-09", 200, 50, 0.25)
 assert compare_periods(yearly.iloc[1:], "Revenue", "Date", lag=12)["prior"] is None  # no data a year ago
 print("engine ok")
+
+# Reading: ragged rows, Windows and UTF-16 encodings, empty sheets.
+from engine import DataError, guess_date_format, read_grid as rg  # noqa: E402
+
+assert rg(b"Sales,Region\n,,\n,North\n").shape == (3, 3)  # extra trailing comma no longer rejects the file
+assert rg("Région\nÉté\n".encode("cp1252")).iloc[1, 0] == "Été"
+assert rg("Région\tVille\nÉté\tMogadishu\n".encode("utf-16"), delimiter="\t").iloc[1, 1] == "Mogadishu"
+for empty in (b"", b",,\n,,\n"):
+    try:
+        rg(empty)
+        raise AssertionError("empty file accepted")
+    except DataError as exc:
+        assert "no data" in str(exc)
+
+# Date formats are detected, day-first when ambiguous.
+assert guess_date_format(pd.Series(["15/03/2026", "01/02/2026"])) == "%d/%m/%Y"
+assert guess_date_format(pd.Series(["03/15/2026"])) == "%m/%d/%Y"
+assert guess_date_format(pd.Series(["2026-01-01 10:30"])) == "%Y-%m-%d %H:%M"
+assert guess_date_format(pd.Series(["26-March-2025", "1-Apr-2025"])) is None  # mixed month styles
+assert guess_date_format(pd.Series(["26-March-2025"])) == "%d-%B-%Y"
+assert guess_type(pd.Series(["15/03/2026", "16/03/2026"])) == "Date"
+assert guess_type(pd.Series(["Mogadishu", "Baidoa"])) == "Text"
+print("reading ok")

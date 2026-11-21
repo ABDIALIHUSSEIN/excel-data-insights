@@ -1,6 +1,8 @@
 """Spreadsheet ingestion, validation, and exports."""
-from io import BytesIO
+import csv
+from io import BytesIO, StringIO
 from datetime import date, datetime
+from itertools import islice
 import re
 from zipfile import ZipFile
 
@@ -19,20 +21,39 @@ def inspect_workbook(content):
         return workbook.sheet_names
 
 
+class DataError(ValueError):
+    """A problem with the file's contents, with a message safe to show the user."""
+
+
+def decode(content):
+    # Excel saves CSV as UTF-8, Windows-1252 ("CSV" on Windows), or UTF-16 ("Unicode text").
+    if content[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        return content.decode("utf-16")
+    try:
+        return content.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return content.decode("cp1252", errors="replace")
+
+
 def read_grid(content, sheet=None, delimiter=","):
     if sheet is None:
-        grid = pd.read_csv(BytesIO(content), header=None, dtype=str,
-                           keep_default_na=False, skip_blank_lines=False,
-                           sep=delimiter, encoding="utf-8-sig", nrows=MAX_ROWS + 1)
+        # csv.reader tolerates ragged rows (e.g. trailing commas); pad them to the widest row.
+        rows = list(islice(csv.reader(StringIO(decode(content), newline=""), delimiter=delimiter),
+                           MAX_ROWS + 1))
+        width = max(map(len, rows), default=0)
+        if width > MAX_COLUMNS:
+            raise DataError("Limit exceeded: 100,000 rows, 250 columns, or 1 million cells.")
+        grid = pd.DataFrame([row + [""] * (width - len(row)) for row in rows], dtype=object)
     else:
         grid = pd.read_excel(BytesIO(content), sheet_name=sheet, header=None,
                              dtype=object, keep_default_na=False,
                              engine="openpyxl", nrows=MAX_ROWS + 1)
-    if grid.empty:
-        raise ValueError("The file or worksheet has no data.")
+    grid = grid.replace(r"^\s*$", pd.NA, regex=True)
+    if grid.empty or grid.isna().all().all():
+        raise DataError("The file or worksheet has no data.")
     if len(grid) > MAX_ROWS or len(grid.columns) > MAX_COLUMNS or grid.size > MAX_CELLS:
-        raise ValueError("Limit exceeded: 100,000 rows, 250 columns, or 1 million cells.")
-    return grid.replace(r"^\s*$", pd.NA, regex=True)
+        raise DataError("Limit exceeded: 100,000 rows, 250 columns, or 1 million cells.")
+    return grid
 
 
 def use_header(grid, row):
@@ -62,9 +83,26 @@ def guess_type(series):
         return "Text"
     if parse_number(values).notna().all():
         return "Number"
-    if values.astype(str).str.fullmatch(r"\d{4}-\d{2}-\d{2}").all():
+    if guess_date_format(values):
         return "Date"
     return "Text"
+
+
+# Day-first before month-first: 03/04/2026 reads as 3 April. Change the format in Review data if needed.
+DATE_FORMATS = ["%Y-%m-%d", "%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S", "%Y/%m/%d",
+                "%d/%m/%Y", "%m/%d/%Y", "%d-%m-%Y", "%d.%m.%Y", "%d/%m/%Y %H:%M",
+                "%d-%b-%Y", "%d-%B-%Y", "%d %b %Y", "%d %B %Y", "%b %d, %Y", "%B %d, %Y"]
+
+
+def guess_date_format(series):
+    """First format that reads every value, judged on up to 1,000 values; None if none fits."""
+    values = series.dropna().astype("string").str.strip().head(1000)
+    if values.empty:
+        return None
+    for date_format in DATE_FORMATS:
+        if pd.to_datetime(values, format=date_format, errors="coerce").notna().all():
+            return date_format
+    return None
 
 
 # Optional sign, currency before or after, or a trailing percent: -$1,200 · 1,200 USD · 12%

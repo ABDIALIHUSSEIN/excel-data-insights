@@ -1,6 +1,7 @@
 """Launch with: python -m streamlit run app.py"""
 from datetime import datetime
 from hashlib import sha256
+import math
 import os
 from pathlib import Path
 
@@ -8,33 +9,56 @@ import pandas as pd
 import streamlit as st
 
 from agent import analyze, compare_periods, plan
-from engine import csv_bytes, excel_bytes, guess_type, inspect_workbook, prepare, read_grid, use_header
+from engine import (DataError, csv_bytes, excel_bytes, guess_date_format, guess_type, inspect_workbook,
+                    prepare, read_grid, use_header)
 
 st.set_page_config(page_title="Excel Data Insights", page_icon="📊", layout="wide")
-st.title("Excel Data Insights")
 language = st.sidebar.radio("Language / Luqadda", ["English", "Soomaali"], horizontal=True)
+
+SYMBOLS = "$€£¥₹"
+FORMATS = {"%": "percent", "$": "dollar", "€": "euro", "¥": "yen"}
 
 
 def tr(english, somali):
     return somali if language == "Soomaali" else english
 
 
-def show(value, unit, spec=",.2f"):
-    # A "%" unit means values are stored as fractions, so 0.125 shows as 12.5%.
+def show(value, unit="", spec=None):
+    """Readable number: whole numbers without decimals, % with one decimal, currency symbol in front."""
+    if value is None or pd.isna(value) or not math.isfinite(float(value)):
+        return "—"
+    value = float(value) * (100 if unit == "%" else 1)
+    if spec is None:
+        spec = ".3g" if abs(value) >= 1e15 else ",.1f" if unit == "%" else ",.0f" if value.is_integer() else ",.2f"
+    text = f"{abs(value) if unit in SYMBOLS and unit else value:{spec}}"
     if unit == "%":
-        return f"{value * 100:{spec}}%"
-    return f"{value:{spec}} {unit}".strip()
+        return text + "%"
+    if unit and unit in SYMBOLS:
+        return ("-" if value < 0 else "") + unit + text
+    return f"{text} {unit}".strip()
 
 
-def is_percent(series):
+def detect_unit(series):
+    # Preset the Unit when every value carries the same % sign or currency symbol.
     values = series.dropna().astype("string").str.strip()
-    return not values.empty and values.str.endswith("%").all()
+    if values.empty:
+        return ""
+    # 90% rather than all, so a few "n/a" cells don't hide the unit.
+    if values.str.endswith("%").mean() >= 0.9:
+        return "%"
+    for symbol in SYMBOLS:
+        if (values.str.lstrip("+-").str.startswith(symbol) | values.str.endswith(symbol)).mean() >= 0.9:
+            return symbol
+    return ""
 
 
 def percent_columns(table):
-    # Table columns whose unit is %, shown by Streamlit as percentages.
-    return {name: st.column_config.NumberColumn(format="percent") for name in table.columns
-            if name in settings and settings[name][2] == "%"}
+    # Number columns with a % or currency unit, formatted in tables (0.125 → 12.50%, 1200 → $1,200.00).
+    return {name: st.column_config.NumberColumn(
+                format=FORMATS.get(settings[name][2], "localized"),
+                label=f"{name} ({settings[name][2]})" if settings[name][2] not in FORMATS else None)
+            for name in table.columns
+            if name in settings and settings[name][2] and pd.api.types.is_numeric_dtype(table[name])}
 
 
 def chart_ready(table):
@@ -45,19 +69,50 @@ def chart_ready(table):
     return safe
 
 
+def is_rate(name):
+    return name in settings and settings[name][2] == "%"
+
+
 def percent_chart(table):
-    # Charts cannot format their axis, so scale to 0-100 and say so in the series name.
-    return table.apply(lambda column: column * 100 if column.name in percent_columns(table) else column) \
-        .rename(columns=lambda name: f"{name} (%)" if name in percent_columns(table) else name)
+    # Charts cannot format their axis, so scale % columns to 0-100 and label the unit in the series name.
+    scaled = table.apply(lambda column: column * 100 if is_rate(column.name) else column)
+    return scaled.rename(columns=lambda name: f"{name} ({settings[name][2]})"
+                         if name in settings and settings[name][2] else name)
 
 
-st.caption(tr("Upload a spreadsheet, review its quality, and explore what it shows.",
-              "Soo geli fayl, hubi tayada xogta, kadibna sahami natiijooyinka."))
-uploaded = st.file_uploader(tr("Upload Excel or CSV", "Soo geli Excel ama CSV"), type=["xlsx", "csv"])
-if uploaded is None:
-    st.info(tr("Drop a file above, or try the sample below.", "Fayl kor ku rid ama tijaabi tusaalaha hoose."))
-    st.download_button(tr("Download sample", "Soo dejiso tusaale"), (Path(__file__).with_name("sample.csv")).read_bytes(),
-                       "sample.csv", "text/csv")
+class Sample:
+    """The bundled sample, used like an uploaded file."""
+    name = "sample_finance.csv"
+
+    def getvalue(self):
+        return Path(__file__).with_name(self.name).read_bytes()
+
+
+st.title("📊 Excel Data Insights")
+st.caption(tr("Upload a spreadsheet, check its quality, and see what changed — in English or Somali.",
+              "Soo geli fayl, hubi tayada xogta, oo arag waxa isbeddelay — Ingiriis ama Soomaali."))
+uploaded = st.file_uploader(tr("Upload Excel (.xlsx) or CSV, up to 20 MB", "Soo geli Excel (.xlsx) ama CSV, ilaa 20 MB"),
+                            type=["xlsx", "csv"])
+if uploaded is not None:
+    st.session_state.pop("use_sample", None)
+elif st.session_state.get("use_sample"):
+    uploaded = Sample()
+    st.info(tr("Showing the sample file. Upload your own file above to replace it.",
+               "Waxaa muuqda faylka tusaalaha. Fayl kaaga ah kor ku soo geli si aad u beddesho."), icon="🧪")
+else:
+    steps = st.columns(3)
+    for column, (icon, title, text) in zip(steps, [
+            ("📤", tr("1. Upload", "1. Soo geli"), tr("An Excel workbook or a CSV file.", "Buug Excel ama fayl CSV.")),
+            ("🔍", tr("2. Review", "2. Hubi"), tr("Fix column types, blanks, duplicates, and spelling variants.",
+                                                  "Sax noocyada tiirarka, bannaanada iyo kuwa soo noqnoqda.")),
+            ("📈", tr("3. Explore", "3. Sahami"), tr("KPIs vs last month or last year, trends, and what to check next.",
+                                                    "Tilmaamayaasha, isbeddelka iyo waxa xiga ee la hubiyo."))]):
+        with column.container(border=True):
+            st.markdown(f"#### {icon} {title}")
+            st.caption(text)
+    if st.button(tr("Try it with sample sales data", "Ku tijaabi xog iib tusaale ah"), type="primary", icon="🧪"):
+        st.session_state["use_sample"] = True
+        st.rerun()
     st.stop()
 
 content = uploaded.getvalue()
@@ -77,9 +132,14 @@ try:
                       "Tab": "\t", "Pipe |": "|"}
         delimiter = delimiters[st.selectbox(tr("CSV separator", "Kala-soocaha CSV"), list(delimiters))]
     grid = read_grid(content, sheet, delimiter)
+except DataError as exc:
+    st.error(tr(str(exc), {"The file or worksheet has no data.": "Faylka ama xaashidan xog kuma jirto."}.get(
+        str(exc), "Faylku wuxuu dhaafay xadka: 100,000 saf, 250 tiir ama 1 milyan unug.")), icon="⚠️")
+    st.stop()
 except Exception as exc:
-    st.error(tr("Could not read the file. Check its format and separator.",
-                "Faylka lama akhrin karin. Hubi nooca faylka iyo kala-soocaha."))
+    st.error(tr("Could not read the file. Check that it is a real .xlsx or CSV file and pick the right separator.",
+                "Faylka lama akhrin karin. Hubi inuu yahay .xlsx ama CSV dhab ah oo dooro kala-soocaha saxda ah."),
+             icon="⚠️")
     st.caption(type(exc).__name__)
     st.stop()
 
@@ -89,38 +149,74 @@ header = st.number_input(tr("Header row", "Safka cinwaannada"), min_value=1, max
 frame = use_header(grid, header)
 key = f"{source_key}:{header}"
 review, dashboard, assistant, exports = st.tabs([
-    tr("Review data", "Hubi xogta"), tr("Dashboard", "Shaashadda xogta"),
-    tr("Ask the agent", "Weydii kaaliyaha"), tr("Downloads", "Soo dejinta")
+    "🔍 " + tr("Review data", "Hubi xogta"), "📈 " + tr("Dashboard", "Shaashadda xogta"),
+    "💬 " + tr("Ask the agent", "Weydii kaaliyaha"), "⬇️ " + tr("Downloads", "Soo dejinta")
 ])
 
 with review:
-    st.caption(tr(f"{len(frame):,} data rows · {len(frame.columns)} columns",
-                  f"{len(frame):,} saf oo xog ah · {len(frame.columns)} tiir"))
-    st.dataframe(frame.head(30).astype("string"), hide_index=True, width="stretch")
-    schema = pd.DataFrame([{"Column": name, "Type": guess_type(frame[name]),
-                            "Date format": "%Y-%m-%d", "Unit": "%" if is_percent(frame[name]) else ""}
-                           for name in frame])
-    edited = st.data_editor(schema, key=f"schema-{key}", hide_index=True, disabled=["Column"],
-                            column_config={"Type": st.column_config.SelectboxColumn(
-                                options=["Text", "Number", "Date"], required=True)})
-    st.caption(tr("Set a date format such as %d/%m/%Y. Units are labels; the unit % shows 0.125 as 12.5%.",
-                  "Dooro qaabka taariikhda sida %d/%m/%Y. Halbeegyadu waa calaamado; halbeegga % wuxuu 0.125 u muujiyaa 12.5%."))
+    # Settings first (they drive cleaning), then the summary cards are filled in above them.
+    summary_cards = st.container()
+
+    with st.container(border=True):
+        st.markdown("##### " + tr("1 · Column types", "1 · Noocyada tiirarka"))
+        st.caption(tr("Detected automatically. Change a type, date format (e.g. %d/%m/%Y), or unit if it looks wrong. "
+                      "Unit % shows 0.125 as 12.5%; $ € £ ¥ ₹ show as currency.",
+                      "Si toos ah ayaa loo ogaaday. Beddel nooca, qaabka taariikhda ama halbeegga haddii uu khaldan yahay."))
+        schema = pd.DataFrame([{"Column": name, "Type": guess_type(frame[name]),
+                                "Date format": guess_date_format(frame[name]) or "%Y-%m-%d",
+                                "Unit": detect_unit(frame[name])} for name in frame])
+        edited = st.data_editor(schema, key=f"schema-{key}", hide_index=True, disabled=["Column"], width="stretch",
+                                column_config={"Type": st.column_config.SelectboxColumn(
+                                    options=["Text", "Number", "Date"], required=True)})
     settings = {row["Column"]: (row["Type"], row["Date format"] or "%Y-%m-%d", row["Unit"] or "")
                 for row in edited.to_dict("records")}
-    normalize = st.checkbox(tr("Apply category cleanup", "Midee qaybaha isku magaca ah"),
-                            help=tr("Trim spaces and merge case variants.", "Ka saar bannaanada oo midee faraha kala duwan."), key=f"normalize-{key}")
-    clear_invalid = st.checkbox(tr("Replace invalid values with blanks", "Qiyamka khaldan ka dhig bannaan"), key=f"invalid-{key}")
-    deduplicate = st.checkbox(tr("Remove duplicate rows", "Ka saar safafka soo noqnoqda"), key=f"duplicates-{key}")
+
+    with st.container(border=True):
+        st.markdown("##### " + tr("2 · Cleaning", "2 · Hagaajinta"))
+        options = st.columns(3)
+        normalize = options[0].checkbox(tr("Apply category cleanup", "Midee qaybaha isku magaca ah"),
+                                        help=tr("Trim spaces and merge case variants such as Baidoa / baidoa.",
+                                                "Ka saar bannaanada oo midee faraha kala duwan."), key=f"normalize-{key}")
+        clear_invalid = options[1].checkbox(tr("Replace invalid values with blanks", "Qiyamka khaldan ka dhig bannaan"),
+                                            help=tr("Needed to calculate a column that has some invalid cells.",
+                                                    "Waa lagama maarmaan si tiir leh qiyam khaldan loo xisaabiyo."),
+                                            key=f"invalid-{key}")
+        deduplicate = options[2].checkbox(tr("Remove duplicate rows", "Ka saar safafka soo noqnoqda"),
+                                          key=f"duplicates-{key}")
     cleaned, report, invalid = prepare(frame, settings, normalize, clear_invalid, deduplicate)
-    st.dataframe(report, hide_index=True, width="stretch")
-    st.caption(tr(f"Original duplicate rows: {frame.duplicated().sum():,}. Rows removed: {len(frame) - len(cleaned):,}. Unusual numbers are flagged using the 1.5 × IQR rule.",
-                  f"Safafka soo noqnoqday: {frame.duplicated().sum():,}. Safafka laga saaray: {len(frame) - len(cleaned):,}. Qiyamka aan caadiga ahayn waxaa lagu calaamadeeyaa 1.5 × IQR."))
-    issues = [column for column in invalid if not invalid[column].empty]
-    if issues:
-        column = st.selectbox(tr("Inspect invalid values", "Eeg qiyamka khaldan"), issues, key=f"issues-{key}")
-        st.dataframe(invalid[column].head(30).astype("string").rename(column))
-        st.caption(tr("If invalid values are kept, the affected column remains in its original format.",
-                      "Haddii qiyamka khaldan la hayo, tiirka wuxuu sii ahaanayaa qaabkiisii hore."))
+
+    with st.container(border=True):
+        st.markdown("##### " + tr("3 · Quality report", "3 · Warbixinta tayada"))
+        problems = report[["Missing", "Invalid", "Category variants", "Unusual values"]].sum(axis=1)
+        report.insert(0, tr("Status", "Xaalad"), [
+            "✅ OK" if count == 0 else f"⚠️ {count:,} " + tr("to check", "la hubiyo") for count in problems])
+        st.dataframe(report, hide_index=True, width="stretch")
+        st.caption(tr("Unusual values use the 1.5 × IQR rule. Category variants are spellings that differ only in case or spaces.",
+                      "Qiyamka aan caadiga ahayn waxaa lagu calaamadeeyaa 1.5 × IQR."))
+        issues = [column for column in invalid if not invalid[column].empty]
+        if issues:
+            column = st.selectbox(tr("Inspect invalid values", "Eeg qiyamka khaldan"), issues, key=f"issues-{key}")
+            st.dataframe(invalid[column].head(30).astype("string").rename(column), width="stretch")
+            if not clear_invalid:
+                st.caption(tr("While invalid values are kept, the column stays in its original format and can't be calculated.",
+                              "Inta qiyamka khaldan la hayo, tiirka lama xisaabin karo."))
+
+    with st.container(border=True):
+        st.markdown("##### " + tr("4 · Preview (first 30 rows, as in the file)", "4 · Muuqaal (30 saf ee ugu horreeya)"))
+        st.dataframe(frame.head(30).astype("string"), hide_index=True, width="stretch")
+
+    with summary_cards:
+        cells = max(frame.size, 1)
+        quality = st.columns(5)
+        quality[0].metric(tr("Rows", "Safaf"), f"{len(frame):,}", border=True)
+        quality[1].metric(tr("Columns", "Tiirar"), f"{len(frame.columns):,}", border=True)
+        quality[2].metric(tr("Blank cells", "Unugyo bannaan"), f"{int(frame.isna().sum().sum()):,}",
+                          f"{frame.isna().sum().sum() / cells:.1%} " + tr("of cells", "unugyada"),
+                          delta_color="off", delta_arrow="off", border=True)
+        quality[3].metric(tr("Invalid values", "Qiyam khaldan"), f"{int(report['Invalid'].sum()):,}", border=True)
+        quality[4].metric(tr("Duplicate rows", "Safaf soo noqnoqday"), f"{int(frame.duplicated().sum()):,}",
+                          tr(f"{len(frame) - len(cleaned):,} removed", f"{len(frame) - len(cleaned):,} la saaray"),
+                          delta_color="off", delta_arrow="off", border=True)
 
 numeric = list(cleaned.select_dtypes(include="number").columns)
 dates = list(cleaned.select_dtypes(include="datetime").columns)
@@ -128,7 +224,8 @@ categories = [name for name in cleaned if name not in numeric + dates]
 with dashboard:
     # Reading order: purpose and period, KPIs, trend, segment comparison, what to check, detail, notes.
     header = st.container()
-    picks = st.columns(4)
+    controls = st.container(border=True)
+    picks = controls.columns(4)
     measure = picks[0].selectbox(tr("Measure", "Cabbirka"), numeric, key=f"measure-{key}") if numeric else None
     date_column = picks[1].selectbox(tr("Date", "Taariikhda"), dates, key=f"date-{key}") if dates else None
     category = picks[2].selectbox(tr("Compare by", "Isbarbardhig"), categories, key=f"category-{key}") if categories else None
@@ -136,7 +233,7 @@ with dashboard:
     rate = unit == "%"
     lag = 1
     if date_column and measure:
-        lag = st.radio(tr("Compare with", "Is barbar dhig"), [1, 12], horizontal=True, key=f"lag-{key}",
+        lag = controls.radio(tr("Compare with", "Is barbar dhig"), [1, 12], horizontal=True, key=f"lag-{key}",
                        format_func=lambda months: tr("Previous month", "Bishii hore") if months == 1
                        else tr("Same month last year", "Isla bishaas sannadkii hore"))
     target = 0.0
@@ -147,7 +244,7 @@ with dashboard:
     filtered = cleaned
     active = tr("All rows", "Dhammaan safafka")
     filter_key = f"filter-{key}"
-    pick_filter, pick_values, pick_reset = st.columns([2, 3, 1], vertical_alignment="bottom")
+    pick_filter, pick_values, pick_reset = controls.columns([2, 3, 1], vertical_alignment="bottom")
     filter_column = pick_filter.selectbox(tr("Filter", "Shaandhayn"), [None, *cleaned.columns], key=filter_key,
                                           format_func=lambda name: name if name is not None else tr("All rows", "Dhammaan safafka"))
     pick_reset.button(tr("Reset", "Dib u celi"), on_click=lambda: st.session_state.update({filter_key: None}),
@@ -168,7 +265,7 @@ with dashboard:
                     bounds = st.slider(tr("Value range", "Xadka qiimaha"), low, high, (low, high),
                                        key=f"bounds-{key}-{filter_column}-{low}-{high}")
                     filtered = cleaned[values.between(*bounds)]
-                    active = f"{filter_column} {bounds[0]:,.2f} – {bounds[1]:,.2f}"
+                    active = f"{filter_column} {show(bounds[0], settings[filter_column][2])} – {show(bounds[1], settings[filter_column][2])}"
             elif filter_column in categories:
                 labels = values.astype("string")
                 if labels.nunique() > 500:
@@ -239,14 +336,14 @@ with dashboard:
 
         left, right = st.columns(2)
         if date_column and not numbers.empty:
-            with left:
+            with left.container(border=True):
                 st.markdown("**" + tr(f"Monthly {measure}", f"{measure} bil kasta") + "**")
                 months = filtered[date_column].dt.to_period("M").astype("string")
                 monthly = filtered[measure].groupby(months)
                 trend = (monthly.mean() if rate else monthly.sum(min_count=1)).dropna().tail(36).to_frame(measure)
                 st.line_chart(chart_ready(percent_chart(trend)))
         if category:
-            with right if date_column and not numbers.empty else left:
+            with (right if date_column and not numbers.empty else left).container(border=True):
                 labels = filtered[category].astype("string").fillna(tr("(Blank)", "(Bannaan)"))
                 if numbers.empty:
                     st.markdown("**" + tr(f"Rows by {category}", f"Safafka {category} kasta") + "**")
@@ -262,31 +359,36 @@ with dashboard:
 
         table = compared["table"] if compared else None
         if table is not None and table["Change"].notna().any():
-            worst, best = table["Change"].idxmin(), table["Change"].idxmax()
-            move = table.loc[worst, "Change"]
-            name, size = (worst, move) if move < 0 else (best, table.loc[best, "Change"])
-            amount = f"{abs(size) * 100:.1f} pp" if rate else show(abs(size), unit)
-            st.info(tr(f"**What to check next:** {name} had the largest {'decline' if size < 0 else 'increase'} in {measure}, "
-                       f"{amount} from {previous} to {latest}. Filter to {category} = {name} to see which rows drove it.",
-                       f"**Waxa xiga ee la hubiyo:** {name} ayaa ugu {'hoos u dhac' if size < 0 else 'kororka'} badnaa {measure}, "
-                       f"{amount} laga bilaabo {previous} ilaa {latest}. Shaandhee {category} = {name} si aad u aragto safafka."))
-            shown = table.copy()
-            shown.loc[tr("Total", "Wadar")] = [compared["prior"], compared["current"], compared["change"]]
-            if rate:
-                shown["Change"] = shown["Change"] * 100
-            else:
-                shown["% change"] = (shown["Change"] / shown["Previous"].abs()).where(shown["Previous"] != 0)
-            shown = shown.rename(columns={"Previous": previous, "Latest": latest,
-                                          "Change": tr("Change (pp)", "Isbeddel (pp)") if rate else tr("Change", "Isbeddel")})
-            value_format = "percent" if rate else "localized"
-            st.dataframe(shown, width="stretch", column_config={
-                previous: st.column_config.NumberColumn(format=value_format),
-                latest: st.column_config.NumberColumn(format=value_format),
-                "% change": st.column_config.NumberColumn(format="percent")})
+            with st.container(border=True):
+                st.markdown("**" + tr(f"{measure} by {category}: {previous} vs {latest}",
+                                      f"{measure} {category} kasta: {previous} iyo {latest}") + "**")
+                worst, best = table["Change"].idxmin(), table["Change"].idxmax()
+                move = table.loc[worst, "Change"]
+                name, size = (worst, move) if move < 0 else (best, table.loc[best, "Change"])
+                amount = f"{abs(size) * 100:.1f} pp" if rate else show(abs(size), unit)
+                st.info(tr(f"**What to check next:** {name} had the largest {'decline' if size < 0 else 'increase'} in {measure}, "
+                           f"{amount} from {previous} to {latest}. Filter to {category} = {name} to see which rows drove it.",
+                           f"**Waxa xiga ee la hubiyo:** {name} ayaa ugu {'hoos u dhac' if size < 0 else 'kororka'} badnaa {measure}, "
+                           f"{amount} laga bilaabo {previous} ilaa {latest}. Shaandhee {category} = {name} si aad u aragto safafka."))
+                shown = table.copy()
+                shown.loc[tr("Total", "Wadar")] = [compared["prior"], compared["current"], compared["change"]]
+                if rate:
+                    shown["Change"] = shown["Change"] * 100
+                else:
+                    shown["% change"] = (shown["Change"] / shown["Previous"].abs()).where(shown["Previous"] != 0)
+                shown = shown.rename(columns={"Previous": previous, "Latest": latest,
+                                              "Change": tr("Change (pp)", "Isbeddel (pp)") if rate else tr("Change", "Isbeddel")})
+                value_format = FORMATS.get(unit, "localized")
+                st.dataframe(shown, width="stretch", column_config={
+                    previous: st.column_config.NumberColumn(format=value_format),
+                    latest: st.column_config.NumberColumn(format=value_format),
+                    shown.columns[2]: st.column_config.NumberColumn(format="%+.1f" if rate else value_format),
+                    "% change": st.column_config.NumberColumn(format="percent")})
 
-        st.markdown("**" + tr("Detail (first 100 rows)", "Faahfaahin (100 saf ee ugu horreeya)") + "**")
-        st.dataframe(filtered.head(100), hide_index=True, width="stretch",
-                     column_config=percent_columns(filtered))
+        with st.expander(tr(f"Detail: first 100 of {len(filtered):,} rows", f"Faahfaahin: 100 ka mid ah {len(filtered):,} saf"),
+                         icon="📋"):
+            st.dataframe(filtered.head(100), hide_index=True, width="stretch",
+                         column_config=percent_columns(filtered))
 
     applied = [label for label, on in [(tr("category cleanup", "midaynta qaybaha"), normalize),
                                        (tr("invalid values blanked", "qiyamka khaldan la bannaanay"), clear_invalid),
@@ -341,7 +443,7 @@ with assistant:
                 st.metric(tr("Result", "Natiijada"), show(summary["value"], unit, ",.6g"))
                 st.caption(tr(f"Observations used: {summary['n']:,}", f"Tirada la xisaabiyey: {summary['n']:,}"))
             if detail is not None:
-                if operation == "profile" and percent_columns(detail):
+                if operation == "profile" and any(map(is_rate, detail.columns)):
                     # The count row is a number of rows, not a percentage.
                     detail = percent_chart(detail.drop(index="count")).round(4)
                     st.caption(tr(f"Observations used: {summary['n']:,}", f"Tirada la xisaabiyey: {summary['n']:,}"))
