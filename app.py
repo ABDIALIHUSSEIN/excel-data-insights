@@ -535,9 +535,10 @@ with dashboard:
                         cards[2].metric(tr("Average per row", "Celcelis saf kasta"), show(numbers.mean(), unit), border=True)
                     cards[3].metric(tr("Rows in view", "Safafka muuqda"), f"{len(filtered):,}", border=True)
                     if compared["partial"]:
-                        st.caption(tr(f"⚠ {latest} is partial: data runs to {view[date_column].max():%d %b %Y}. "
+                        last_day = view[date_column].max().strftime("%d %b %Y")
+                        st.caption(tr(f"⚠ {latest} is partial: data runs to {last_day}. "
                                       "Compare it with a full month with care.",
-                                      f"⚠ {latest} waa qayb: xogtu waxay ku egtahay {view[date_column].max():%d %b %Y}."))
+                                      f"⚠ {latest} waa qayb: xogtu waxay ku egtahay {last_day}."))
                     table = compared["table"]
                     if table is not None and table["Change"].notna().any():
                         worst, best = table["Change"].idxmin(), table["Change"].idxmax()
